@@ -130,13 +130,13 @@ scene.add(rig);
 camera.position.set(0, 1.7, 0);
 camera.rotation.order = 'YXZ';
 
-scene.add(new THREE.HemisphereLight(0xffffff, 0x6b665c, 0.9));
-const sun = new THREE.DirectionalLight(0xffffff, 0.8);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x6b665c, 0.62));
+const sun = new THREE.DirectionalLight(0xffffff, 0.62);
 sun.position.set(6, 14, 10);
 scene.add(sun);
 
 /* Suelo */
-const ground = new THREE.Mesh(new THREE.PlaneGeometry(400, 245), new THREE.MeshStandardMaterial({ color: 0xb3a07a, roughness: 1 }));
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(400, 245), new THREE.MeshStandardMaterial({ color: 0xa8966f, roughness: 1 }));
 ground.rotation.x = -Math.PI / 2;
 ground.position.set(0, 0, -47.5);
 scene.add(ground);
@@ -545,7 +545,7 @@ if (CONFIG.entorno) {
   worker(17.5, 9, 2.2, 0xff7a00);
   worker(19, -6.5, 1, 0xc7e000);
   worker(-14, -3, 0.3, 0xff7a00);
-  worker(7, -0.4, -Math.PI / 2, 0xc7e000);                     // supervisor mirando el andamio
+  worker(12.5, -0.4, -Math.PI / 2, 0xc7e000);                  // supervisor mirando el andamio
 
   /* ---- vehículos en la calle y palmeras ---- */
   car(-30, 30.8, 0, 0xc0392b);
@@ -653,7 +653,7 @@ let bodyYaw = 0;
 for (const sx of [-1, 1]) {
   bodyLegs.push(bbox(body, 0.14, 1, 0.17, sx * 0.09, 0.5, 0.0, BODY.pants));
   const shoe = new THREE.Group();
-  shoe.position.set(sx * 0.1, 0, -0.1);
+  shoe.position.set(sx * 0.1, 0, -0.16);
   body.add(shoe);
   bbox(shoe, 0.105, 0.025, 0.30, 0, 0.0125, -0.03, BODY.sole);       // suela
   bbox(shoe, 0.10, 0.085, 0.27, 0, 0.0675, -0.04, BODY.leather);     // cuero
@@ -680,13 +680,14 @@ const deskMount = [new THREE.Group(), new THREE.Group()];
 const grips = [renderer.xr.getControllerGrip(0), renderer.xr.getControllerGrip(1)];
 [-1, 1].forEach((sx, i) => {
   const hand = makeHand(sx);
+  hand.scale.setScalar(0.8);
   bodyHands.push(hand);
-  deskMount[i].position.set(sx * 0.30, -0.30, -0.55);
+  deskMount[i].position.set(sx * 0.34, -0.33, -0.62);
   deskMount[i].rotation.set(0.15, -sx * 0.15, sx * 0.1);
   camera.add(deskMount[i]);
   deskMount[i].add(hand);
   rig.add(grips[i]);
-  const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.042, 0.036, 1, 8), BM(BODY.sleeve));
+  const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.026, 1, 8), BM(BODY.sleeve));
   arm.frustumCulled = false;
   scene.add(arm);
   bodyArms.push(arm);
