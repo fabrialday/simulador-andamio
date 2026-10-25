@@ -53,6 +53,7 @@
    ============================================================ */
 const CONFIG = {
   niveles: 5,                  // niveles de trabajo de 2 m c/u (5 = 10 m)
+  entorno: true,               // instalación de faenas alrededor (?entorno=0 la desactiva si el visor va lento)
   trabajoSegundos: 3.5,        // tiempo "trabajando" en altura antes del remecido
   remecidoSegundos: 2.0,       // duración del remecido previo al colapso
   modoCaida: 'visible',        // 'visible' = se ve la caída hasta el suelo | 'fundido' = corte a negro sin caída (más cómodo)
@@ -68,6 +69,7 @@ const CONFIG = {
 };
 const _qs = new URLSearchParams(location.search);
 if (_qs.get('caida') === 'fundido') CONFIG.modoCaida = 'fundido';
+if (_qs.get('entorno') === '0') CONFIG.entorno = false;
 if (_qs.get('niveles')) { const n = parseInt(_qs.get('niveles'), 10); if (n >= 2 && n <= 8) CONFIG.niveles = n; }
 const TOP = CONFIG.niveles * 2;   // altura de la plataforma de trabajo (m)
 
@@ -88,7 +90,7 @@ const DEFECTS = [
 
 const VANT = [ {x:-9, z:2.5}, {x:9, z:2.5}, {x:-4, z:9}, {x:4, z:9} ];
 const SCAF_CENTER = new THREE.Vector3(0, 0, -0.5);
-const P0 = new THREE.Vector3(0.8, TOP + 0.03, -0.5);   // dónde se para el trabajador en la plataforma
+const P0 = new THREE.Vector3(0.8, TOP + 0.06, -0.5);   // dónde se para el trabajador en la plataforma
 
 /* ============================================================
    ESTADO
@@ -119,9 +121,9 @@ document.getElementById('app').appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xa9cbe8);
-scene.fog = new THREE.Fog(0xa9cbe8, 30, 90);
+scene.fog = new THREE.Fog(0xa9cbe8, 50, 230);
 
-const camera = new THREE.PerspectiveCamera(65, innerWidth / innerHeight, 0.05, 150);
+const camera = new THREE.PerspectiveCamera(65, innerWidth / innerHeight, 0.05, 320);
 const rig = new THREE.Group();
 rig.add(camera);
 scene.add(rig);
@@ -133,23 +135,12 @@ const sun = new THREE.DirectionalLight(0xffffff, 0.8);
 sun.position.set(6, 14, 10);
 scene.add(sun);
 
-/* Suelo, muro y utilería */
-const ground = new THREE.Mesh(new THREE.PlaneGeometry(140, 140), new THREE.MeshStandardMaterial({ color: 0x7a7468, roughness: 1 }));
+/* Suelo */
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(400, 245), new THREE.MeshStandardMaterial({ color: 0xb3a07a, roughness: 1 }));
 ground.rotation.x = -Math.PI / 2;
+ground.position.set(0, 0, -47.5);
 scene.add(ground);
 
-const wallMat = new THREE.MeshStandardMaterial({ color: 0xd8d0c0, roughness: 0.95 });
-const wall = new THREE.Mesh(new THREE.BoxGeometry(20, TOP + 8, 0.4), wallMat);
-wall.position.set(0, (TOP + 8) / 2, -1.7);
-scene.add(wall);
-const winMat = new THREE.MeshStandardMaterial({ color: 0x3b4a5a, roughness: 0.4 });
-for (let y = 3.5; y < TOP + 6; y += 3.5) {
-  [-6.5, 6.5].forEach(x => {
-    const w = new THREE.Mesh(new THREE.BoxGeometry(1.3, 1.6, 0.06), winMat);
-    w.position.set(x, y, -1.48);
-    scene.add(w);
-  });
-}
 // luminaria a reemplazar
 const lamp = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 0.12, 20), new THREE.MeshStandardMaterial({ color: 0xffe9a8, emissive: 0xffd36b, emissiveIntensity: 0.6 }));
 lamp.rotation.x = Math.PI / 2;
@@ -161,16 +152,79 @@ const steel = new THREE.MeshStandardMaterial({ color: 0x9aa0a6, metalness: 0.5, 
 const darkMat = new THREE.MeshStandardMaterial({ color: 0x3d4146, roughness: 0.7 });
 const brickMat = new THREE.MeshStandardMaterial({ color: 0xa0522d, roughness: 1 });
 
-for (let i = 0; i < 3; i++) {
-  const p = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.15, 1.0), woodMat);
-  p.position.set(6 + i * 1.4, 0.075, 5 - i * 0.6);
-  scene.add(p);
+/* ============================================================
+   UTILIDADES DE GEOMETRÍA ESTÁTICA
+   Lo estático se fusiona por material: pocos draw calls (importa en el Quest).
+   ============================================================ */
+const siteG = new THREE.Group();
+let cur = siteG;
+const matCache = {};
+function M(c) { return matCache[c] || (matCache[c] = new THREE.MeshStandardMaterial({ color: c, roughness: 0.9, metalness: 0.05 })); }
+function sbox(w, h, d, x, y, z, c, ry) {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), M(c));
+  m.position.set(x, y, z);
+  if (ry) m.rotation.y = ry;
+  cur.add(m);
+  return m;
 }
-for (let i = 0; i < 3; i++) {
-  const cone = new THREE.Mesh(new THREE.ConeGeometry(0.15, 0.5, 12), new THREE.MeshStandardMaterial({ color: 0xff6a00 }));
-  cone.position.set(-6 + i * 1.2, 0.25, 4.2);
-  scene.add(cone);
+function scyl(rt, rb, h, x, y, z, c, seg, rx, rz) {
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, h, seg || 10), M(c));
+  m.position.set(x, y, z);
+  if (rx) m.rotation.x = rx;
+  if (rz) m.rotation.z = rz;
+  cur.add(m);
+  return m;
 }
+function stube(a, b, r, c) {
+  const dir = new THREE.Vector3().subVectors(b, a);
+  const len = dir.length();
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, 6), M(c));
+  m.position.copy(a).addScaledVector(dir, 0.5);
+  m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().normalize());
+  cur.add(m);
+  return m;
+}
+function place(x, y, z, ry, fn) {
+  const g = new THREE.Group();
+  g.position.set(x, y, z);
+  g.rotation.y = ry || 0;
+  const prev = cur;
+  cur = g;
+  fn();
+  cur = prev;
+  cur.add(g);
+}
+function mergeInto(parent, src) {
+  src.updateMatrixWorld(true);
+  const buckets = new Map();
+  const v = new THREE.Vector3();
+  src.traverse(o => {
+    if (!o.isMesh) return;
+    const g = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry;
+    const pa = g.attributes.position, na = g.attributes.normal;
+    let b = buckets.get(o.material);
+    if (!b) { b = { pos: [], nor: [] }; buckets.set(o.material, b); }
+    const nm = new THREE.Matrix3().getNormalMatrix(o.matrixWorld);
+    for (let i = 0; i < pa.count; i++) {
+      v.fromBufferAttribute(pa, i).applyMatrix4(o.matrixWorld);
+      b.pos.push(v.x, v.y, v.z);
+      v.fromBufferAttribute(na, i).applyMatrix3(nm).normalize();
+      b.nor.push(v.x, v.y, v.z);
+    }
+    if (g !== o.geometry) g.dispose();
+    o.geometry.dispose();
+  });
+  buckets.forEach((b, mat) => {
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(b.pos, 3));
+    geo.setAttribute('normal', new THREE.Float32BufferAttribute(b.nor, 3));
+    geo.computeBoundingSphere();
+    parent.add(new THREE.Mesh(geo, mat));
+  });
+}
+let _s = 12345;
+const rnd = () => { _s = (_s * 1664525 + 1013904223) >>> 0; return _s / 4294967296; };
+const scafBuild = new THREE.Group();
 
 /* ============================================================
    ANDAMIO (la altura depende de CONFIG.niveles)
@@ -187,13 +241,13 @@ function tube(a, b, r, mat) {
   const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, 8), mat);
   m.position.copy(a).addScaledVector(dir, 0.5);
   m.quaternion.setFromUnitVectors(UP, dir.clone().normalize());
-  scaf.add(m);
+  scafBuild.add(m);
   return m;
 }
 function box(w, h, d, x, y, z, mat) {
   const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
   m.position.set(x, y, z);
-  scaf.add(m);
+  scafBuild.add(m);
   return m;
 }
 
@@ -245,6 +299,303 @@ for (const x of [-2.5, 2.5]) for (const y of LEVELS) {
   box(0.2, 0.2, 0.04, x, y, -1.48, darkMat);
 }
 
+mergeInto(scaf, scafBuild);   // el andamio completo queda en pocos meshes
+
+/* ============================================================
+   INSTALACIÓN DE FAENAS
+   Referencia: obra costera con grúa, containers, acopios, cerco y vehículos.
+   ============================================================ */
+// edificio en construcción (siempre presente)
+const BH = TOP + 8;
+sbox(24, BH, 12, 0, BH / 2, -7.5, 0xd8d0c0);
+sbox(24, 1.2, 0.1, 0, 0.6, -1.45, 0xa39a8a);
+for (let y = 3.5; y < TOP + 6; y += 3.5) {
+  for (const x of [-9, -5.5, 5.5, 9]) {
+    sbox(1.5, 1.8, 0.06, x, y, -1.485, 0xeeeeee);
+    sbox(1.3, 1.6, 0.06, x, y, -1.465, 0x3b4a5a);
+  }
+}
+
+if (CONFIG.entorno) {
+  /* ---- terreno, calle, mar y ciudad ---- */
+  sbox(600, 0.4, 185, 0, -0.25, 167.5, 0x4f86b0);              // mar
+  sbox(160, 0.04, 9, 0, 0.02, 33.5, 0x3a3d40);                 // calzada
+  for (let x = -76; x < 80; x += 6) sbox(2.5, 0.05, 0.2, x, 0.03, 33.5, 0xf0e68c);
+  sbox(160, 0.06, 3, 0, 0.03, 28, 0xb9b6ae);                   // vereda
+  sbox(160, 0.03, 14, 0, 0.015, 45, 0x5f8a3f);                 // pasto
+  sbox(8, 0.03, 14, 0, 0.03, 19, 0x8b8a86);                    // camino de acceso (ripio)
+  sbox(2.4, 0.03, 13, 0, 0.05, 17.5, 0x3f8a4a);                // pasillo peatonal verde
+  for (let i = 0; i < 10; i++) sbox(2 + rnd() * 3, 0.02, 1.5 + rnd() * 3, (rnd() - 0.5) * 44, 0.02, -10 + rnd() * 34, 0x9a8962);   // huellas
+  const tones = [0xcfcfc9, 0xb8bcc2, 0xe6e2d6, 0xa9b0b8, 0xd8c9b5];
+  for (let i = 0; i < 24; i++) {
+    const w = 8 + rnd() * 12, d = 10 + rnd() * 10, h = 14 + rnd() * 36;
+    sbox(w, h, d, -180 + i * 15.5 + rnd() * 5, h / 2, -70 - rnd() * 50, tones[i % tones.length]);
+  }
+  for (let i = 0; i < 12; i++) {
+    const side = i % 2 ? 1 : -1, w = 10 + rnd() * 8, d = 10 + rnd() * 8, h = 8 + rnd() * 16;
+    sbox(w, h, d, side * (62 + rnd() * 40), h / 2, -20 + rnd() * 70, tones[(i + 2) % tones.length]);
+  }
+
+  /* ---- cerco perimetral con portón ---- */
+  function fenceLine(x1, z1, x2, z2) {
+    const L = Math.hypot(x2 - x1, z2 - z1), n = Math.max(1, Math.round(L / 2.5));
+    const dx = (x2 - x1) / n, dz = (z2 - z1) / n, seg = L / n, ang = Math.atan2(-dz, dx);
+    for (let i = 0; i < n; i++) {
+      const cx = x1 + dx * (i + 0.5), cz = z1 + dz * (i + 0.5);
+      sbox(seg - 0.04, 2.2, 0.06, cx, 1.2, cz, 0x56697a, ang);
+      sbox(seg, 0.08, 0.12, cx, 2.34, cz, 0x3b4652, ang);
+      sbox(0.12, 2.5, 0.12, x1 + dx * i, 1.25, z1 + dz * i, 0x2f3740);
+    }
+    sbox(0.12, 2.5, 0.12, x2, 1.25, z2, 0x2f3740);
+  }
+  fenceLine(-26, -16, 26, -16);
+  fenceLine(-26, -16, -26, 26);
+  fenceLine(26, -16, 26, 26);
+  fenceLine(-26, 26, -4, 26);
+  fenceLine(4, 26, 26, 26);
+  sbox(0.28, 2.9, 0.28, -4, 1.45, 26, 0x2f3740);
+  sbox(0.28, 2.9, 0.28, 4, 1.45, 26, 0x2f3740);
+  sbox(0.06, 2.2, 3.8, -4, 1.2, 24, 0x56697a);                 // hojas del portón, abiertas
+  sbox(0.06, 2.2, 3.8, 4, 1.2, 24, 0x56697a);
+
+  /* ---- piezas reutilizables ---- */
+  function container(x, y, z, ry, color, stripe) {
+    place(x, y, z, ry, () => {
+      sbox(6, 2.5, 2.4, 0, 1.35, 0, color);
+      sbox(6.1, 0.12, 2.5, 0, 2.66, 0, 0x2b2f33);
+      sbox(6, 0.2, 2.4, 0, 0.1, 0, 0x2b2f33);
+      if (stripe) sbox(6.04, 0.45, 2.44, 0, 2.0, 0, stripe);
+      sbox(1.0, 2.0, 0.06, -2.2, 1.2, 1.2, 0x3a3f45);
+      sbox(1.3, 0.9, 0.06, -0.6, 1.4, 1.2, 0x6f8ca3);
+      sbox(1.3, 0.9, 0.06, 1.4, 1.4, 1.2, 0x6f8ca3);
+    });
+  }
+  function bano(x, z, ry) {
+    place(x, 0, z, ry, () => {
+      sbox(1.1, 2.3, 1.1, 0, 1.2, 0, 0x2f6fb0);
+      sbox(1.2, 0.1, 1.2, 0, 2.38, 0, 0xe8ecef);
+      sbox(0.7, 1.8, 0.05, 0, 1.05, 0.56, 0xdfe6ea);
+    });
+  }
+  function pallet(x, z, ry, layers, c) {
+    place(x, 0, z, ry, () => {
+      sbox(1.2, 0.14, 1.0, 0, 0.07, 0, 0xb88a4a);
+      sbox(1.1, layers * 0.2, 0.9, 0, 0.14 + layers * 0.1, 0, c);
+      sbox(1.12, 0.03, 0.04, 0, 0.14 + layers * 0.1, 0.2, 0x2b2f33);
+    });
+  }
+  function cone(x, z) {
+    sbox(0.38, 0.03, 0.38, x, 0.015, z, 0x2b2f33);
+    scyl(0.02, 0.15, 0.55, x, 0.3, z, 0xff6a00, 10);
+    scyl(0.075, 0.095, 0.1, x, 0.36, z, 0xf2f2f2, 10);
+  }
+  function barrier(x, z, ry) {
+    place(x, 0, z, ry, () => { sbox(2.0, 0.8, 0.4, 0, 0.4, 0, 0xa7a8a3); sbox(2.0, 0.2, 0.6, 0, 0.1, 0, 0xa7a8a3); });
+  }
+  function lightTower(x, z) {
+    place(x, 0, z, 0, () => {
+      sbox(2, 0.3, 1.2, 0, 0.4, 0, 0xe3a21a);
+      stube(new THREE.Vector3(0, 0.5, 0), new THREE.Vector3(0, 6.5, 0), 0.1, 0x9aa0a6);
+      sbox(1.6, 0.6, 0.2, 0, 6.8, 0, 0x2b2f33);
+      sbox(1.4, 0.4, 0.05, 0, 6.8, 0.12, 0xfff3b0);
+    });
+  }
+  function worker(x, z, ry, vest) {
+    place(x, 0, z, ry, () => {
+      sbox(0.17, 0.85, 0.22, -0.1, 0.43, 0, 0x2f3e5c);
+      sbox(0.17, 0.85, 0.22, 0.1, 0.43, 0, 0x2f3e5c);
+      sbox(0.2, 0.09, 0.28, -0.1, 0.045, -0.04, 0x4a3322);
+      sbox(0.2, 0.09, 0.28, 0.1, 0.045, -0.04, 0x4a3322);
+      sbox(0.46, 0.62, 0.26, 0, 1.15, 0, vest);
+      sbox(0.47, 0.06, 0.27, 0, 1.15, 0, 0xdddddd);
+      sbox(0.12, 0.6, 0.14, -0.3, 1.12, 0, vest);
+      sbox(0.12, 0.6, 0.14, 0.3, 1.12, 0, vest);
+      scyl(0.1, 0.1, 0.2, 0, 1.58, 0, 0xc99a7a, 8);
+      scyl(0.12, 0.15, 0.11, 0, 1.72, 0, 0xf2f2f2, 8);
+    });
+  }
+  function chassisCab() {
+    sbox(8, 0.35, 2.4, 0, 0.95, 0, 0x2b2f33);
+    sbox(2.0, 2.1, 2.3, 3.2, 2.2, 0, 0xf2f2f2);
+    sbox(0.06, 0.9, 1.9, 4.22, 2.7, 0, 0x6f8ca3);
+    for (const wx of [-3.4, -2.0, 3.0]) for (const wz of [-1.2, 1.2]) scyl(0.55, 0.55, 0.4, wx, 0.55, wz, 0x1a1a1a, 12, Math.PI / 2);
+  }
+  function dumpTruck(x, z, ry) {
+    place(x, 0, z, ry, () => { chassisCab(); sbox(4.8, 1.7, 2.5, -1.4, 2.15, 0, 0xe3a21a); sbox(4.9, 0.1, 2.6, -1.4, 3.05, 0, 0x8a6d12); });
+  }
+  function mixerTruck(x, z, ry) {
+    place(x, 0, z, ry, () => { chassisCab(); scyl(1.1, 0.6, 4.6, -0.6, 2.75, 0, 0xe3731a, 12, 0, Math.PI / 2 - 0.15); });
+  }
+  function pickup(x, z, ry, c) {
+    place(x, 0, z, ry, () => {
+      sbox(4.8, 0.7, 1.9, 0, 0.75, 0, c);
+      sbox(1.8, 0.75, 1.8, 0.7, 1.45, 0, c);
+      sbox(0.06, 0.6, 1.6, 1.62, 1.5, 0, 0x6f8ca3);
+      sbox(0.4, 0.12, 1.2, 0.7, 1.88, 0, 0xff8c00);
+      for (const wx of [-1.5, 1.5]) for (const wz of [-0.95, 0.95]) scyl(0.38, 0.38, 0.3, wx, 0.38, wz, 0x1a1a1a, 10, Math.PI / 2);
+    });
+  }
+  function car(x, z, ry, c) {
+    place(x, 0, z, ry, () => {
+      sbox(4.3, 0.65, 1.8, 0, 0.62, 0, c);
+      sbox(2.3, 0.55, 1.6, -0.2, 1.2, 0, c);
+      sbox(2.32, 0.38, 1.62, -0.2, 1.22, 0, 0x6f8ca3);
+      for (const wx of [-1.4, 1.4]) for (const wz of [-0.85, 0.85]) scyl(0.33, 0.33, 0.25, wx, 0.33, wz, 0x1a1a1a, 10, Math.PI / 2);
+    });
+  }
+  function palm(x, z, h) {
+    const top = new THREE.Vector3(x + (rnd() - 0.5) * 1.2, h, z);
+    stube(new THREE.Vector3(x, 0, z), top, 0.2, 0x7b5a3a);
+    for (let i = 0; i < 8; i++) {
+      const a = i * Math.PI / 4 + rnd() * 0.4;
+      stube(top, new THREE.Vector3(top.x + Math.cos(a) * 2.6, top.y - 0.9 - rnd() * 0.5, top.z + Math.sin(a) * 2.6), 0.07, 0x3e7a35);
+    }
+  }
+
+  /* ---- grúa oruga (lado izquierdo, pluma sobre el edificio) ---- */
+  (function crane() {
+    const R = 0xc0392b, W = 0xf2f2f2, D = 0x2b2f33;
+    sbox(6.2, 1.0, 1.3, -19, 0.5, -7.8, D);
+    sbox(6.2, 1.0, 1.3, -19, 0.5, -4.2, D);
+    sbox(5, 1.3, 3.4, -19, 1.65, -6, R);
+    sbox(1.4, 1.7, 3.0, -21.6, 2.0, -6, 0x555a60);
+    sbox(1.8, 1.7, 1.5, -17, 3.1, -5.0, R);
+    sbox(0.06, 0.9, 1.2, -16.1, 3.2, -5.0, 0x6f8ca3);
+    const b0 = { x: -18.5, y: 3.2 }, t = { x: -14, y: 24 }, N = 10, p1 = [], p2 = [];
+    for (let i = 0; i <= N; i++) {
+      const f = i / N, w = 0.34 * (1 - f) + 0.12 * f;
+      const x = b0.x + (t.x - b0.x) * f, y = b0.y + (t.y - b0.y) * f;
+      p1.push(new THREE.Vector3(x, y, -6 + w));
+      p2.push(new THREE.Vector3(x, y, -6 - w));
+    }
+    for (let i = 0; i < N; i++) {
+      stube(p1[i], p1[i + 1], 0.07, i % 2 ? W : R);
+      stube(p2[i], p2[i + 1], 0.07, i % 2 ? W : R);
+      stube(p1[i], p2[i], 0.04, W);
+      stube(p1[i], p2[i + 1], 0.035, W);
+    }
+    stube(new THREE.Vector3(-19.5, 3.2, -6), new THREE.Vector3(-17.6, 11, -6), 0.12, R);
+    stube(new THREE.Vector3(-17.6, 11, -6), new THREE.Vector3(-22, 3.3, -6), 0.05, D);
+    stube(new THREE.Vector3(-17.6, 11, -6), new THREE.Vector3(-14.1, 23.7, -6), 0.03, D);
+    stube(new THREE.Vector3(-14, 24, -6), new THREE.Vector3(-14, 11.5, -6), 0.03, D);   // cable
+    sbox(0.5, 0.5, 0.5, -14, 11.2, -6, 0xe3a21a);                                        // gancho
+    stube(new THREE.Vector3(-14.5, 11, -6), new THREE.Vector3(-14.9, 9.6, -6), 0.02, D);
+    stube(new THREE.Vector3(-13.5, 11, -6), new THREE.Vector3(-13.1, 9.6, -6), 0.02, D);
+    sbox(2.0, 0.25, 1.2, -14, 9.5, -6, 0xb88a4a);
+    sbox(1.8, 0.7, 1.0, -14, 9.95, -6, 0xb5654a);
+  })();
+
+  /* ---- lado izquierdo: oficinas, bodegas, comedor, áridos ---- */
+  container(-19, 0, 12, 0, 0x2a5d9f, 0xe8ecef);                // oficina
+  container(-19, 2.7, 12, 0, 0x2a5d9f, 0xe8ecef);              // oficina, segundo piso
+  place(-19, 0, 12, 0, () => {                                   // escalera y descanso
+    for (let i = 0; i < 10; i++) sbox(1.0, 0.06, 0.32, -2.2, 0.25 + i * 0.26, 4.6 - i * 0.32, 0x8a949c);
+    sbox(1.4, 0.08, 1.4, -2.2, 2.8, 1.9, 0x8a949c);
+    stube(new THREE.Vector3(-2.75, 0.9, 4.6), new THREE.Vector3(-2.75, 3.6, 1.6), 0.025, 0x9aa0a6);
+    stube(new THREE.Vector3(-1.65, 0.9, 4.6), new THREE.Vector3(-1.65, 3.6, 1.6), 0.025, 0x9aa0a6);
+  });
+  container(-12.5, 0, 12, 0, 0x8a949c, null);                  // bodega
+  container(-19, 0, 17.5, 0, 0xe8ecef, 0x4f7d5c);              // comedor
+  container(-12.5, 0, 17.5, 0, 0x4f7d5c, null);                // bodega 2
+  sbox(2.2, 2.4, 2.2, -7.5, 1.2, 23.5, 0x2a5d9f);              // caseta de control
+  sbox(2.4, 0.12, 2.4, -7.5, 2.46, 23.5, 0x2b2f33);
+  sbox(1.2, 0.8, 0.06, -7.5, 1.5, 24.62, 0x6f8ca3);
+  place(-23, 0, 2, 0, () => { sbox(5, 1.3, 2.1, 0, 0.75, 0, 0x3a8f4f); sbox(4.6, 0.04, 1.7, 0, 1.42, 0, 0x1f5b30); });   // volquete de escombros
+  scyl(0.3, 3.2, 2.2, -16, 1.1, -11, 0xc9b27c, 9);              // arena
+  scyl(0.3, 2.8, 1.9, -20.5, 0.95, -13, 0x8b8a86, 9);           // ripio
+  for (let i = 0; i < 5; i++) scyl(0.29, 0.29, 0.88, -23.5 + (i % 2) * 0.7, 0.44, 7 + i * 0.75, i % 2 ? 0x2e6fb5 : 0x3a8f4f, 10);
+  lightTower(-14, 15);
+
+  /* ---- lado derecho: acopios, baños, vehículos ---- */
+  for (let i = 0; i < 4; i++) bano(21, 14 + i * 1.3, -Math.PI / 2);
+  place(18.5, 0, 5, 0, () => {                                   // fierros (enfierradura)
+    for (const zt of [-2.4, 0, 2.4]) sbox(1.6, 0.45, 0.14, 0, 0.225, zt, 0x2b2f33);
+    for (let r = 0; r < 3; r++) for (let c = 0; c < 4; c++) sbox(0.3, 0.3, 6.0, (c - 1.5) * 0.34, 0.6 + r * 0.31, 0, (r + c) % 2 ? 0x8a4b2d : 0x6f3c25);
+  });
+  place(15.5, 0, -2, 0.1, () => { for (let i = 0; i < 6; i++) sbox(2.4, 0.17, 1.2, 0, 0.09 + i * 0.18, 0, i % 2 ? 0xd9b27a : 0xc89a5a); });   // moldajes
+  pallet(20, -3, 0, 6, 0xb5654a);
+  pallet(22, -3, 0.2, 6, 0xa8a8a0);
+  pallet(20, -5, 0, 5, 0xa8a8a0);
+  pallet(22.2, -5, 0.1, 6, 0xb5654a);
+  pallet(15, -6, 0.3, 5, 0xd8d4c8);
+  pallet(16.5, -6, 0, 5, 0xd8d4c8);
+  place(19, 0, -11, 0, () => { for (let i = 0; i < 5; i++) sbox(6, 0.28, 0.5, 0, 0.14 + i * 0.29, 0, 0xd1692b); });   // tablestacas
+  place(19, 0, -13.5, 0, () => { for (let i = 0; i < 4; i++) sbox(6, 0.28, 0.5, 0, 0.14 + i * 0.29, 0, 0xd1692b); });
+  for (let r = 0; r < 3; r++) for (let c = 0; c < 4 - r; c++) scyl(0.14, 0.14, 5, 21.5, 0.15 + r * 0.24, 9.5 + c * 0.3 + r * 0.15, 0xd9e0e6, 10, 0, Math.PI / 2);   // tuberías
+  place(16.5, 0, 11.8, 0, () => {                                // acopio de tubos de andamio
+    for (const xt of [-2, 0, 2]) sbox(0.12, 0.4, 1.2, xt, 0.2, 0, 0x2b2f33);
+    for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) scyl(0.045, 0.045, 5.5, 0, 0.5 + r * 0.1, (c - 1) * 0.12, 0x9aa0a6, 8, 0, Math.PI / 2);
+  });
+  sbox(1.8, 1.1, 0.9, 23, 0.65, -0.5, 0xe3b523);               // generador
+  sbox(1.6, 0.1, 0.7, 23, 1.25, -0.5, 0x2b2f33);
+  lightTower(12.5, -12);
+  dumpTruck(11, 18.5, -0.25);
+  mixerTruck(17, 21.5, Math.PI);
+  pickup(-9, 22, 0.15, 0xf2f2f2);
+
+  /* ---- seguridad vial en el acceso ---- */
+  barrier(-6.5, 25.2, 0);
+  barrier(6.5, 25.2, 0);
+  for (const x of [-6, -5, 5, 6]) cone(x, 24.2);
+  for (const [x, z] of [[8, 16], [8.8, 16.6], [-5.5, 12], [5.5, 12]]) cone(x, z);
+
+  /* ---- personal ---- */
+  worker(-17, 9.6, 0.5, 0xff7a00);
+  worker(-13.5, 9.8, -0.8, 0xc7e000);
+  worker(17.5, 9, 2.2, 0xff7a00);
+  worker(19, -6.5, 1, 0xc7e000);
+  worker(-14, -3, 0.3, 0xff7a00);
+  worker(7, -0.4, -Math.PI / 2, 0xc7e000);                     // supervisor mirando el andamio
+
+  /* ---- vehículos en la calle y palmeras ---- */
+  car(-30, 30.8, 0, 0xc0392b);
+  car(-8, 30.8, 0, 0xf2f2f2);
+  car(3, 30.8, 0, 0x8a949c);
+  car(14, 30.8, 0, 0x1f3a5f);
+  car(36, 30.8, 0, 0xf2f2f2);
+  for (const x of [-40, -28, -16, -4, 8, 20, 32, 44]) palm(x, 41 + rnd() * 4, 6 + rnd() * 2.5);
+  palm(-24, 23, 6); palm(24, 23.5, 7); palm(8, 24, 5.5);
+}
+
+mergeInto(scene, siteG);   // todo lo estático del entorno, fusionado por material
+
+/* ---- señalética (texto genérico, sin marcas) ---- */
+function makeSign(lines, bg, fg, w, h) {
+  const c = document.createElement('canvas');
+  c.width = 512; c.height = Math.round(512 * h / w);
+  const g = c.getContext('2d');
+  g.fillStyle = bg; g.fillRect(0, 0, c.width, c.height);
+  g.strokeStyle = fg; g.lineWidth = 10; g.strokeRect(8, 8, c.width - 16, c.height - 16);
+  g.fillStyle = fg; g.textAlign = 'center'; g.textBaseline = 'middle';
+  const lh = c.height / (lines.length + 1);
+  lines.forEach((t, i) => {
+    let size = i === 0 ? 54 : 38;
+    g.font = 'bold ' + size + 'px sans-serif';
+    while (g.measureText(t).width > c.width - 50 && size > 14) { size -= 2; g.font = 'bold ' + size + 'px sans-serif'; }
+    g.fillText(t, c.width / 2, lh * (i + 1));
+  });
+  return new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(c), side: THREE.DoubleSide }));
+}
+if (CONFIG.entorno) {
+  const signPoles = new THREE.Group();
+  const SIGNS = [
+    { x: -8, z: 7.5, lines: ['PELIGRO', 'TRABAJOS EN ALTURA', 'USO OBLIGATORIO', 'DE ARNÉS'], bg: '#f2c500', fg: '#111111' },
+    { x: 8, z: 7.5, lines: ['OBRA EN', 'CONSTRUCCIÓN', 'PERSONAL AUTORIZADO'], bg: '#ffffff', fg: '#c0392b' },
+    { x: -6, z: 24.8, lines: ['USO OBLIGATORIO', 'CASCO · CHALECO', 'ZAPATOS DE SEGURIDAD'], bg: '#1e6fb8', fg: '#ffffff' },
+    { x: 6, z: 24.8, lines: ['VELOCIDAD', 'MÁXIMA', '10 km/h'], bg: '#ffffff', fg: '#c0392b' }
+  ];
+  SIGNS.forEach(sg => {
+    const m = makeSign(sg.lines, sg.bg, sg.fg, 1.3, 1.0);
+    m.position.set(sg.x, 2.0, sg.z);
+    scene.add(m);
+    for (const dx of [-0.5, 0.5]) {
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 2.5, 6), M(0x9aa0a6));
+      pole.position.set(sg.x + dx, 1.25, sg.z - 0.04);
+      scene.add(pole);
+    }
+  });
+}
+
 /* ============================================================
    ZONAS MARCABLES (invisibles) Y PUNTOS DE VISTA
    ============================================================ */
@@ -275,11 +626,112 @@ const rings = [];
 VANT.forEach((v, i) => {
   const m = new THREE.Mesh(new THREE.CircleGeometry(0.6, 32), new THREE.MeshBasicMaterial({ color: 0x2f7de1, transparent: true, opacity: 0.35, side: THREE.DoubleSide }));
   m.rotation.x = -Math.PI / 2;
-  m.position.set(v.x, 0.03, v.z);
+  m.position.set(v.x, 0.06, v.z);
   m.userData = { kind: 'ring', idx: i };
   scene.add(m);
   rings.push(m);
 });
+
+/* ============================================================
+   CUERPO EN PRIMERA PERSONA
+   Manos con guantes, pecho con chaleco reflectante, piernas y zapatos de seguridad
+   (cuero, puntera de acero, suela antideslizante). Se ve al mirar hacia abajo.
+   ============================================================ */
+const BODY = { pants: 0x2f3e5c, vest: 0xff7a00, band: 0xe2e2e2, sleeve: 0x5a6b7a, leather: 0x4a3322, sole: 0x161616, cap: 0xa7adb3, glove: 0xd9a441, cuff: 0x2b2f33, reflect: 0xe8e65a };
+const bmat = {};
+function BM(c) { return bmat[c] || (bmat[c] = new THREE.MeshStandardMaterial({ color: c, roughness: 0.85, metalness: 0.05 })); }
+function bbox(parent, w, h, d, x, y, z, c) {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), BM(c));
+  m.position.set(x, y, z);
+  parent.add(m);
+  return m;
+}
+const body = new THREE.Group();
+scene.add(body);
+const bodyLegs = [], bodyArms = [], bodyHands = [];
+let bodyYaw = 0;
+for (const sx of [-1, 1]) {
+  bodyLegs.push(bbox(body, 0.14, 1, 0.17, sx * 0.09, 0.5, 0.0, BODY.pants));
+  const shoe = new THREE.Group();
+  shoe.position.set(sx * 0.1, 0, -0.1);
+  body.add(shoe);
+  bbox(shoe, 0.105, 0.025, 0.30, 0, 0.0125, -0.03, BODY.sole);       // suela
+  bbox(shoe, 0.10, 0.085, 0.27, 0, 0.0675, -0.04, BODY.leather);     // cuero
+  bbox(shoe, 0.095, 0.06, 0.09, 0, 0.055, -0.175, BODY.cap);         // puntera de acero
+  bbox(shoe, 0.10, 0.10, 0.09, 0, 0.09, 0.05, BODY.leather);         // caña
+  bbox(shoe, 0.104, 0.02, 0.05, 0, 0.115, 0.05, BODY.reflect);       // banda reflectante
+}
+const bodyHips = bbox(body, 0.32, 0.18, 0.2, 0, 0.9, 0.05, BODY.pants);
+const bodyTorso = bbox(body, 0.40, 1, 0.22, 0, 1.2, 0.06, BODY.vest);
+const bodyBandA = bbox(body, 0.405, 0.05, 0.225, 0, 1.1, 0.06, BODY.band);
+const bodyBandB = bbox(body, 0.405, 0.05, 0.225, 0, 1.3, 0.06, BODY.band);
+
+function makeHand(sx) {
+  const h = new THREE.Group();
+  bbox(h, 0.085, 0.035, 0.10, 0, 0, 0, BODY.glove);                  // palma
+  const f = bbox(h, 0.08, 0.03, 0.075, 0, -0.006, -0.08, BODY.glove); // dedos
+  f.rotation.x = 0.25;
+  const th = bbox(h, 0.03, 0.03, 0.06, -sx * 0.05, -0.004, -0.03, BODY.glove);   // pulgar
+  th.rotation.y = -sx * 0.5;
+  bbox(h, 0.09, 0.045, 0.04, 0, 0, 0.07, BODY.cuff);                 // puño
+  return h;
+}
+const deskMount = [new THREE.Group(), new THREE.Group()];
+const grips = [renderer.xr.getControllerGrip(0), renderer.xr.getControllerGrip(1)];
+[-1, 1].forEach((sx, i) => {
+  const hand = makeHand(sx);
+  bodyHands.push(hand);
+  deskMount[i].position.set(sx * 0.30, -0.30, -0.55);
+  deskMount[i].rotation.set(0.15, -sx * 0.15, sx * 0.1);
+  camera.add(deskMount[i]);
+  deskMount[i].add(hand);
+  rig.add(grips[i]);
+  const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.042, 0.036, 1, 8), BM(BODY.sleeve));
+  arm.frustumCulled = false;
+  scene.add(arm);
+  bodyArms.push(arm);
+});
+function setHandParents(xr) {
+  bodyHands.forEach((h, i) => {
+    if (xr) { grips[i].add(h); h.rotation.set(-0.35, 0, 0); h.position.set(0, 0, 0); }
+    else { deskMount[i].add(h); h.rotation.set(0, 0, 0); h.position.set(0, 0, 0); }
+  });
+}
+function chainVisible(o) { while (o) { if (!o.visible) return false; o = o.parent; } return true; }
+const _b1 = new THREE.Vector3(), _b2 = new THREE.Vector3(), _b3 = new THREE.Vector3(), _b4 = new THREE.Vector3();
+function updateBody() {
+  camera.getWorldPosition(_b1);
+  const floorY = rig.position.y;
+  const headH = Math.max(0.9, _b1.y - floorY);
+  camera.getWorldDirection(_b2);
+  if (Math.hypot(_b2.x, _b2.z) > 0.3) {
+    let d = Math.atan2(-_b2.x, -_b2.z) - bodyYaw;
+    d = Math.atan2(Math.sin(d), Math.cos(d));
+    bodyYaw += d * 0.12;
+  }
+  body.position.set(_b1.x, floorY, _b1.z);
+  body.rotation.y = bodyYaw;
+  const hipY = headH * 0.52, shY = headH - 0.2, th = shY - (hipY + 0.09);
+  bodyLegs.forEach(l => { l.scale.y = hipY - 0.1; l.position.y = 0.1 + (hipY - 0.1) / 2; });
+  bodyHips.position.y = hipY;
+  bodyTorso.scale.y = th;
+  bodyTorso.position.y = hipY + 0.09 + th / 2;
+  bodyBandA.position.y = hipY + 0.09 + th * 0.3;
+  bodyBandB.position.y = hipY + 0.09 + th * 0.7;
+  body.updateMatrixWorld(true);
+  [-1, 1].forEach((sx, i) => {
+    const arm = bodyArms[i], hand = bodyHands[i];
+    if (!chainVisible(hand)) { arm.visible = false; return; }
+    arm.visible = true;
+    body.localToWorld(_b3.set(sx * 0.22, shY - 0.04, 0.04));
+    hand.getWorldPosition(_b4);
+    _b2.subVectors(_b4, _b3);
+    const len = _b2.length();
+    arm.position.copy(_b3).addScaledVector(_b2, 0.5);
+    arm.scale.set(1, Math.max(len, 0.01), 1);
+    arm.quaternion.setFromUnitVectors(UP, _b2.normalize());
+  });
+}
 
 /* ============================================================
    FUNDIDO A NEGRO Y VIÑETA (comodidad en VR)
@@ -976,9 +1428,11 @@ async function enterVR() {
     const session = await navigator.xr.requestSession('immersive-vr', { optionalFeatures: ['local-floor', 'bounded-floor'] });
     await renderer.xr.setSession(session);
     state.inXR = true;
+    setHandParents(true);
     document.getElementById('vrbtn').style.display = 'none';
     session.addEventListener('end', () => {
       state.inXR = false;
+      setHandParents(false);
       document.getElementById('vrbtn').style.display = 'block';
       camera.position.set(0, 1.7, 0);
       applyLook();
@@ -1020,6 +1474,7 @@ renderer.setAnimationLoop(function () {
   updateFade();
   updateVig();
   animScaffold();
+  updateBody();
   updateHover();
   renderer.render(scene, camera);
 });
@@ -1034,7 +1489,7 @@ window.addEventListener('resize', () => {
 teleport(2);
 renderUI();
 setupVR();
-window.__sim = { state, CONFIG, DEFECTS, TOP };
+window.__sim = { state, CONFIG, DEFECTS, TOP, HIT, rig, body, scene, startInspect, reportNoConforme, authorize, restart };
 
 })();
 </script>
