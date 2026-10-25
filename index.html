@@ -26,6 +26,7 @@
   #card li span{display:block;font-size:13px;opacity:.85;margin-top:2px}
   #card .row{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
   #card small{display:block;margin-top:12px;opacity:.6}
+  #card .fall{background:#3a1f1f;border-left:5px solid #e74c3c;padding:8px 10px;border-radius:8px;margin:10px 0;font-weight:600}
   .score{font-size:18px;font-weight:700}
   #toast{position:fixed;top:56px;left:50%;transform:translateX(-50%);background:#f39c12;color:#111;padding:8px 14px;border-radius:10px;font-weight:600;display:none}
 </style>
@@ -48,16 +49,27 @@
 
 /* ============================================================
    PARÁMETROS EXTERNALIZADOS
+   Se pueden sobrescribir por URL:  ?caida=fundido   ?niveles=3
    ============================================================ */
 const CONFIG = {
+  niveles: 5,                  // niveles de trabajo de 2 m c/u (5 = 10 m)
   trabajoSegundos: 3.5,        // tiempo "trabajando" en altura antes del remecido
-  remecidoSegundos: 2.4,       // duración del remecido previo al colapso
-  inclinacionRad: 0.12,        // inclinación final del andamio (alejándose del muro)
-  fadeSegundos: 0.6,           // fundido a negro (transiciones y caída)
+  remecidoSegundos: 2.0,       // duración del remecido previo al colapso
+  modoCaida: 'visible',        // 'visible' = se ve la caída hasta el suelo | 'fundido' = corte a negro sin caída (más cómodo)
+  alfaColapso: 0.62,           // aceleración angular del vuelco (rad/s²)
+  anguloDesprendimientoRad: 0.25, // inclinación a la que el trabajador pierde el apoyo
+  anguloMaxRad: 1.52,          // inclinación final del andamio caído
+  negroPostImpactoSeg: 1.8,    // pantalla en negro tras el impacto
+  inclinacionRad: 0.12,        // solo modo 'fundido'
+  fadeSegundos: 0.6,
   penalizacionFalsoPositivo: 10,
   factorPuntajeSiColapsa: 0.3,
   endpointRegistro: null       // ej: "https://tu-backend/api/sesiones" (POST JSON). null = solo descarga manual
 };
+const _qs = new URLSearchParams(location.search);
+if (_qs.get('caida') === 'fundido') CONFIG.modoCaida = 'fundido';
+if (_qs.get('niveles')) { const n = parseInt(_qs.get('niveles'), 10); if (n >= 2 && n <= 8) CONFIG.niveles = n; }
+const TOP = CONFIG.niveles * 2;   // altura de la plataforma de trabajo (m)
 
 /* Defectos del escenario. Contenido pedagógico POR VALIDAR con un prevencionista
    y sin referencias normativas todavía. */
@@ -69,19 +81,20 @@ const DEFECTS = [
   { id: 'amarre', nombre: 'Falta de amarre a la fachada en el nivel superior', estructural: true,
     porque: 'Sin amarres a intervalos adecuados, un andamio alto puede volcar hacia afuera ante carga o viento.' },
   { id: 'baranda', nombre: 'Baranda ausente en el borde de la plataforma superior', estructural: false,
-    porque: 'El borde queda abierto: un tropiezo o pérdida de equilibrio puede terminar en caída desde unos 6 m.' },
+    porque: 'El borde queda abierto: un tropiezo o pérdida de equilibrio puede terminar en caída desde unos ' + TOP + ' m.' },
   { id: 'hueco', nombre: 'Tabla faltante en la plataforma de trabajo (hueco)', estructural: false,
     porque: 'Un hueco en el piso de trabajo permite caída a través de la abertura y aumenta el riesgo de tropiezo.' }
 ];
 
-const VANT = [ {x:-8, z:1.5}, {x:8, z:1.5}, {x:-3.5, z:7}, {x:3.5, z:7} ];
+const VANT = [ {x:-9, z:2.5}, {x:9, z:2.5}, {x:-4, z:9}, {x:4, z:9} ];
 const SCAF_CENTER = new THREE.Vector3(0, 0, -0.5);
+const P0 = new THREE.Vector3(0.8, TOP + 0.03, -0.5);   // dónde se para el trabajador en la plataforma
 
 /* ============================================================
    ESTADO
    ============================================================ */
 const state = { phase: 'brief', marks: new Set(), log: [], t0: performance.now(), result: null, vantage: 2, inXR: false, msg: '' };
-const anim = { shake0: 0, lean0: 0, collapsed: false };
+const anim = { shake0: 0, lean0: 0, collapse0: 0, collapsed: false, finalAngle: CONFIG.inclinacionRad, fall: null };
 const nowS = () => performance.now() / 1000;
 function logEv(type, id) { state.log.push({ t: +((performance.now() - state.t0) / 1000).toFixed(2), tipo: type, id: id || null }); }
 
@@ -106,9 +119,9 @@ document.getElementById('app').appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xa9cbe8);
-scene.fog = new THREE.Fog(0xa9cbe8, 25, 70);
+scene.fog = new THREE.Fog(0xa9cbe8, 30, 90);
 
-const camera = new THREE.PerspectiveCamera(65, innerWidth / innerHeight, 0.05, 120);
+const camera = new THREE.PerspectiveCamera(65, innerWidth / innerHeight, 0.05, 150);
 const rig = new THREE.Group();
 rig.add(camera);
 scene.add(rig);
@@ -121,24 +134,26 @@ sun.position.set(6, 14, 10);
 scene.add(sun);
 
 /* Suelo, muro y utilería */
-const ground = new THREE.Mesh(new THREE.PlaneGeometry(90, 90), new THREE.MeshStandardMaterial({ color: 0x7a7468, roughness: 1 }));
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(140, 140), new THREE.MeshStandardMaterial({ color: 0x7a7468, roughness: 1 }));
 ground.rotation.x = -Math.PI / 2;
 scene.add(ground);
 
 const wallMat = new THREE.MeshStandardMaterial({ color: 0xd8d0c0, roughness: 0.95 });
-const wall = new THREE.Mesh(new THREE.BoxGeometry(16, 13, 0.4), wallMat);
-wall.position.set(0, 6.5, -1.7);
+const wall = new THREE.Mesh(new THREE.BoxGeometry(20, TOP + 8, 0.4), wallMat);
+wall.position.set(0, (TOP + 8) / 2, -1.7);
 scene.add(wall);
 const winMat = new THREE.MeshStandardMaterial({ color: 0x3b4a5a, roughness: 0.4 });
-[[-6, 3.5], [6, 3.5], [-6, 9], [6, 9], [-6, 11.5], [6, 11.5]].forEach(([x, y]) => {
-  const w = new THREE.Mesh(new THREE.BoxGeometry(1.3, 1.6, 0.06), winMat);
-  w.position.set(x, y, -1.48);
-  scene.add(w);
-});
+for (let y = 3.5; y < TOP + 6; y += 3.5) {
+  [-6.5, 6.5].forEach(x => {
+    const w = new THREE.Mesh(new THREE.BoxGeometry(1.3, 1.6, 0.06), winMat);
+    w.position.set(x, y, -1.48);
+    scene.add(w);
+  });
+}
 // luminaria a reemplazar
 const lamp = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 0.12, 20), new THREE.MeshStandardMaterial({ color: 0xffe9a8, emissive: 0xffd36b, emissiveIntensity: 0.6 }));
 lamp.rotation.x = Math.PI / 2;
-lamp.position.set(0.8, 7.9, -1.42);
+lamp.position.set(0.8, TOP + 1.9, -1.42);
 scene.add(lamp);
 
 const woodMat = new THREE.MeshStandardMaterial({ color: 0xb88a4a, roughness: 0.9 });
@@ -148,17 +163,18 @@ const brickMat = new THREE.MeshStandardMaterial({ color: 0xa0522d, roughness: 1 
 
 for (let i = 0; i < 3; i++) {
   const p = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.15, 1.0), woodMat);
-  p.position.set(5 + i * 1.4, 0.075, 4 - i * 0.6);
+  p.position.set(6 + i * 1.4, 0.075, 5 - i * 0.6);
   scene.add(p);
 }
 for (let i = 0; i < 3; i++) {
   const cone = new THREE.Mesh(new THREE.ConeGeometry(0.15, 0.5, 12), new THREE.MeshStandardMaterial({ color: 0xff6a00 }));
-  cone.position.set(-5 + i * 1.2, 0.25, 3.2);
+  cone.position.set(-6 + i * 1.2, 0.25, 4.2);
   scene.add(cone);
 }
 
 /* ============================================================
-   ANDAMIO
+   ANDAMIO (la altura depende de CONFIG.niveles)
+   El grupo gira alrededor de los pies delanteros (z = 0) al colapsar.
    ============================================================ */
 const scaf = new THREE.Group();
 scene.add(scaf);
@@ -182,12 +198,13 @@ function box(w, h, d, x, y, z, mat) {
 }
 
 const XS = [-2.5, 0, 2.5];
-const LEVELS = [2, 4, 6];
+const LEVELS = [];
+for (let k = 1; k <= CONFIG.niveles; k++) LEVELS.push(2 * k);
 
 // pies (el de adelante-derecha es el defectuoso: sobre ladrillos, sin placa)
 for (const x of XS) for (const z of [0, -1]) {
   const malo = (x === 2.5 && z === 0);
-  tube(V(x, malo ? 0.2 : 0.1, z), V(x, 7.0, z), 0.04, steel);
+  tube(V(x, malo ? 0.2 : 0.1, z), V(x, TOP + 1, z), 0.04, steel);
   if (!malo) box(0.3, 0.04, 0.3, x, 0.02, z, darkMat);
 }
 const b1 = box(0.22, 0.1, 0.11, 2.48, 0.05, 0.04, brickMat); b1.rotation.y = 0.3;
@@ -201,18 +218,20 @@ for (const y of [0.4].concat(LEVELS)) {
 
 // plataformas (falta una tabla en el nivel superior, módulo derecho)
 for (const y of LEVELS) for (let bay = 0; bay < 2; bay++) for (let i = 0; i < 5; i++) {
-  if (y === 6 && bay === 1 && i === 3) continue;
+  if (y === TOP && bay === 1 && i === 3) continue;
   box(0.47, 0.05, 1.0, -2.5 + bay * 2.5 + 0.25 + i * 0.5, y + 0.035, -0.5, woodMat);
 }
 
-// diagonales en la cara frontal: módulo izquierdo completo, derecho solo nivel 1
-tube(V(-2.5, 0.4, 0), V(0, 2, 0), 0.025, steel);
-tube(V(0, 2, 0), V(-2.5, 4, 0), 0.025, steel);
-tube(V(-2.5, 4, 0), V(0, 6, 0), 0.025, steel);
+// diagonales en la cara frontal: módulo izquierdo en zigzag completo; derecho solo el primer nivel
+for (let k = 1; k <= CONFIG.niveles; k++) {
+  const yPrev = k === 1 ? 0.4 : 2 * (k - 1), yk = 2 * k;
+  if (k % 2 === 1) tube(V(-2.5, yPrev, 0), V(0, yk, 0), 0.025, steel);
+  else tube(V(0, yPrev, 0), V(-2.5, yk, 0), 0.025, steel);
+}
 tube(V(0, 0.4, 0), V(2.5, 2, 0), 0.025, steel);
 
 // barandas superiores (falta el frente del módulo derecho)
-for (const y of [6.5, 7.0]) {
+for (const y of [TOP + 0.5, TOP + 1.0]) {
   tube(V(-2.5, y, 0), V(0, y, 0), 0.03, steel);
   tube(V(-2.5, y, -1), V(2.5, y, -1), 0.03, steel);
   tube(V(-2.5, y, 0), V(-2.5, y, -1), 0.03, steel);
@@ -221,7 +240,7 @@ for (const y of [6.5, 7.0]) {
 
 // amarres a la fachada (falta el superior derecho)
 for (const x of [-2.5, 2.5]) for (const y of LEVELS) {
-  if (x === 2.5 && y === 6) continue;
+  if (x === 2.5 && y === TOP) continue;
   tube(V(x, y, -1), V(x, y, -1.5), 0.03, steel);
   box(0.2, 0.2, 0.04, x, y, -1.48, darkMat);
 }
@@ -240,17 +259,17 @@ function addHit(id, defectId, cx, cy, cz, sx, sy, sz) {
   HIT.push(h);
 }
 // defectos reales
-addHit('h_arriost', 'arriost', 1.25, 4.05, 0, 2.5, 3.7, 0.4);
+addHit('h_arriost', 'arriost', 1.25, (2.2 + TOP - 0.1) / 2, 0, 2.5, TOP - 2.3, 0.4);
 addHit('h_base',    'base',    2.5, 0.12, 0.02, 0.7, 0.4, 0.7);
-addHit('h_amarre',  'amarre',  2.5, 6, -1.25, 0.9, 1.2, 0.8);
-addHit('h_baranda', 'baranda', 1.25, 6.55, 0, 2.5, 1.1, 0.4);
-addHit('h_hueco',   'hueco',   1.75, 6.0, -0.5, 0.7, 0.5, 1.1);
+addHit('h_amarre',  'amarre',  2.5, TOP, -1.25, 0.9, 1.2, 0.8);
+addHit('h_baranda', 'baranda', 1.25, TOP + 0.55, 0, 2.5, 1.1, 0.4);
+addHit('h_hueco',   'hueco',   1.75, TOP, -0.5, 0.7, 0.5, 1.1);
 // elementos correctos (para detectar falsos positivos)
 addHit('o_diag',    null, -1.25, 3, 0, 2.5, 1.8, 0.4);
 addHit('o_base',    null, -2.5, 0.1, 0, 0.7, 0.4, 0.7);
 addHit('o_amarre',  null, -2.5, 4, -1.25, 0.9, 1.2, 0.8);
-addHit('o_baranda', null, -1.25, 6.55, 0, 2.5, 1.1, 0.4);
-addHit('o_plataf',  null, -1.25, 6.0, -0.5, 2.4, 0.4, 1.1);
+addHit('o_baranda', null, -1.25, TOP + 0.55, 0, 2.5, 1.1, 0.4);
+addHit('o_plataf',  null, -1.25, TOP, -0.5, 2.4, 0.4, 1.1);
 
 const rings = [];
 VANT.forEach((v, i) => {
@@ -263,7 +282,7 @@ VANT.forEach((v, i) => {
 });
 
 /* ============================================================
-   FUNDIDO A NEGRO (comodidad en VR: sin movimiento continuo)
+   FUNDIDO A NEGRO Y VIÑETA (comodidad en VR)
    ============================================================ */
 const fadeMat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0, side: THREE.BackSide, depthTest: false, depthWrite: false });
 const fadeMesh = new THREE.Mesh(new THREE.SphereGeometry(0.6, 16, 12), fadeMat);
@@ -280,6 +299,29 @@ function updateFade() {
   fadeMesh.visible = fade.cur > 0.002;
 }
 
+// viñeta (visión de túnel durante la caída: reduce el mareo)
+const vc = document.createElement('canvas');
+vc.width = vc.height = 256;
+const vg = vc.getContext('2d');
+const grad = vg.createRadialGradient(128, 128, 40, 128, 128, 128);
+grad.addColorStop(0, 'rgba(0,0,0,0)');
+grad.addColorStop(0.55, 'rgba(0,0,0,0.5)');
+grad.addColorStop(1, 'rgba(0,0,0,1)');
+vg.fillStyle = grad;
+vg.fillRect(0, 0, 256, 256);
+const vigMat = new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(vc), transparent: true, opacity: 0, depthTest: false, depthWrite: false });
+const vig = new THREE.Mesh(new THREE.PlaneGeometry(1.8, 1.8), vigMat);
+vig.position.set(0, 0, -0.3);
+vig.renderOrder = 998;
+vig.frustumCulled = false;
+vig.visible = false;
+camera.add(vig);
+let vigTarget = 0;
+function updateVig() {
+  vigMat.opacity += (vigTarget - vigMat.opacity) * 0.12;
+  vig.visible = vigMat.opacity > 0.01;
+}
+
 /* ============================================================
    MIRAR (escritorio) Y MOVERSE
    ============================================================ */
@@ -287,13 +329,14 @@ let yaw = 0, pitch = 0.15;
 function applyLook() { if (!renderer.xr.isPresenting) camera.rotation.set(pitch, yaw, 0); }
 function resetLook(p) { yaw = 0; pitch = p; applyLook(); }
 
+function faceFrom(x, z, fx, fz) { return Math.atan2(-(fx - x), -(fz - z)); }
+
 function teleport(idx) {
   state.vantage = idx;
   const v = VANT[idx];
   rig.position.set(v.x, 0, v.z);
-  const dx = SCAF_CENTER.x - v.x, dz = SCAF_CENTER.z - v.z;
-  rig.rotation.y = Math.atan2(-dx, -dz);
-  resetLook(0.18);
+  rig.rotation.y = faceFrom(v.x, v.z, SCAF_CENTER.x, SCAF_CENTER.z);
+  resetLook(0.3);
   logEv('punto_de_vista', String(idx + 1));
   placePanel();
 }
@@ -301,12 +344,12 @@ function teleport(idx) {
 /* ============================================================
    PANEL VR (canvas en 3D)
    ============================================================ */
-const PW = 1024, PH = 1024;
+const PW = 1024, PH = 1180;
 const pcanvas = document.createElement('canvas');
 pcanvas.width = PW; pcanvas.height = PH;
 const pctx = pcanvas.getContext('2d');
 const ptex = new THREE.CanvasTexture(pcanvas);
-const panel = new THREE.Mesh(new THREE.PlaneGeometry(1.3, 1.3), new THREE.MeshBasicMaterial({ map: ptex, transparent: true }));
+const panel = new THREE.Mesh(new THREE.PlaneGeometry(1.3, 1.3 * PH / PW), new THREE.MeshBasicMaterial({ map: ptex, transparent: true }));
 panel.userData = { kind: 'panel' };
 panel.visible = false;
 scene.add(panel);
@@ -362,7 +405,7 @@ function drawPanel() {
     c.font = 'bold 48px sans-serif';
     let y = wrapText(c, 'Inspección previa de andamio', 60, 60, 900, 58);
     c.font = '32px sans-serif';
-    y = wrapText(c, 'Tarea: reemplazar una luminaria en la fachada, a unos 6 m de altura, trabajando desde este andamio.', 60, y + 20, 900, 42);
+    y = wrapText(c, 'Tarea: reemplazar una luminaria en la fachada, a unos ' + TOP + ' m de altura, trabajando desde este andamio.', 60, y + 20, 900, 42);
     y = wrapText(c, 'Antes de subir, inspecciónalo. Marca todo lo que consideres un defecto. Luego puedes reportarlo como no conforme o autorizar la subida.', 60, y + 20, 900, 42);
     pbtn('Iniciar inspección', 112, 800, 800, 120, '#2f7de1', startInspect);
   } else if (ph === 'inspect') {
@@ -374,8 +417,8 @@ function drawPanel() {
     c.fillStyle = '#ffb347';
     c.fillText('Marcados: ' + state.marks.size, 60, y + 30);
     if (state.msg) { c.font = '30px sans-serif'; c.fillStyle = '#ff8080'; wrapText(c, state.msg, 60, y + 90, 900, 40); }
-    pbtn('Reportar andamio NO conforme', 80, 640, 864, 120, '#1e8e5a', reportNoConforme);
-    pbtn('Autorizar y subir', 80, 790, 864, 120, '#c0392b', authorize);
+    pbtn('Reportar andamio NO conforme', 80, 800, 864, 120, '#1e8e5a', reportNoConforme);
+    pbtn('Autorizar y subir', 80, 950, 864, 120, '#c0392b', authorize);
   } else if (ph === 'debrief' && state.result) {
     const r = state.result;
     c.font = 'bold 40px sans-serif';
@@ -387,7 +430,12 @@ function drawPanel() {
     c.fillStyle = '#ddd';
     c.font = '26px sans-serif';
     y = wrapText(c, r.mensaje, 50, y, 920, 32);
-    y += 8;
+    if (r.caida) {
+      c.font = 'bold 27px sans-serif';
+      c.fillStyle = '#ff9b8a';
+      y = wrapText(c, r.caida.texto, 50, y + 8, 920, 33);
+    }
+    y += 10;
     for (const it of r.items) {
       c.font = 'bold 27px sans-serif';
       c.fillStyle = it.found ? '#2ecc71' : '#ff6b5e';
@@ -402,7 +450,7 @@ function drawPanel() {
       c.fillStyle = '#ffb347';
       c.fillText('Marcaste ' + r.falsos + ' elemento(s) correcto(s) como defecto.', 50, y);
     }
-    pbtn('Reintentar', 312, 910, 400, 90, '#2f7de1', restart);
+    pbtn('Reintentar', 312, PH - 110, 400, 90, '#2f7de1', restart);
   }
   ptex.needsUpdate = true;
 }
@@ -497,7 +545,7 @@ cv.addEventListener('pointermove', e => {
   if (drag.moved) {
     yaw -= (e.clientX - drag.lx) * 0.004;
     pitch -= (e.clientY - drag.ly) * 0.004;
-    pitch = Math.max(-1.2, Math.min(1.4, pitch));
+    pitch = Math.max(-1.5, Math.min(1.5, pitch));
     applyLook();
   }
   drag.lx = e.clientX; drag.ly = e.clientY;
@@ -554,10 +602,17 @@ function refreshHits() {
 }
 
 /* ============================================================
-   FLUJO DEL ESCENARIO
+   SONIDO (síntesis simple, sin archivos)
    ============================================================ */
 let actx = null;
+let whooshNode = null;
 function initAudio() { try { actx = actx || new (window.AudioContext || window.webkitAudioContext)(); if (actx.state === 'suspended') actx.resume(); } catch (e) {} }
+function noiseBuf(sec) {
+  const b = actx.createBuffer(1, Math.floor(actx.sampleRate * sec), actx.sampleRate);
+  const d = b.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  return b;
+}
 function creak() {
   try {
     initAudio();
@@ -574,7 +629,79 @@ function creak() {
     o.start(t); o.stop(t + d + 0.05);
   } catch (e) {}
 }
+function clang() {
+  try {
+    initAudio();
+    if (!actx) return;
+    const t = actx.currentTime;
+    [180, 277, 410].forEach((f, i) => {
+      const o = actx.createOscillator(), g = actx.createGain();
+      o.type = 'triangle';
+      o.frequency.setValueAtTime(f, t);
+      g.gain.setValueAtTime(0.18 / (i + 1), t);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.9);
+      o.connect(g); g.connect(actx.destination);
+      o.start(t); o.stop(t + 1);
+    });
+  } catch (e) {}
+}
+function whoosh(dur) {
+  try {
+    initAudio();
+    if (!actx) return;
+    const t = actx.currentTime;
+    const s = actx.createBufferSource();
+    s.buffer = noiseBuf(dur + 0.5);
+    const f = actx.createBiquadFilter();
+    f.type = 'lowpass';
+    f.frequency.setValueAtTime(250, t);
+    f.frequency.exponentialRampToValueAtTime(3200, t + Math.max(dur, 0.3));
+    const g = actx.createGain();
+    g.gain.setValueAtTime(0.02, t);
+    g.gain.linearRampToValueAtTime(0.4, t + Math.max(dur, 0.3));
+    s.connect(f); f.connect(g); g.connect(actx.destination);
+    s.start(t);
+    whooshNode = { s, g };
+  } catch (e) {}
+}
+function stopWhoosh() {
+  try {
+    if (!whooshNode || !actx) return;
+    const t = actx.currentTime;
+    whooshNode.g.gain.cancelScheduledValues(t);
+    whooshNode.g.gain.setValueAtTime(0, t);
+    whooshNode.s.stop(t + 0.02);
+  } catch (e) {}
+  whooshNode = null;
+}
+function thud() {
+  try {
+    initAudio();
+    if (!actx) return;
+    const t = actx.currentTime;
+    const o = actx.createOscillator(), g = actx.createGain();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(75, t);
+    o.frequency.exponentialRampToValueAtTime(26, t + 0.4);
+    g.gain.setValueAtTime(0.9, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.5);
+    o.connect(g); g.connect(actx.destination);
+    o.start(t); o.stop(t + 0.55);
+    const s = actx.createBufferSource();
+    s.buffer = noiseBuf(0.3);
+    const f = actx.createBiquadFilter();
+    f.type = 'lowpass'; f.frequency.value = 420;
+    const g2 = actx.createGain();
+    g2.gain.setValueAtTime(0.7, t);
+    g2.gain.exponentialRampToValueAtTime(0.0001, t + 0.28);
+    s.connect(f); f.connect(g2); g2.connect(actx.destination);
+    s.start(t);
+  } catch (e) {}
+}
 
+/* ============================================================
+   FLUJO DEL ESCENARIO
+   ============================================================ */
 function toast(msg) {
   state.msg = msg;
   const el = document.getElementById('toast');
@@ -606,7 +733,7 @@ function authorize() {
   fadeTo(1, CONFIG.fadeSegundos);
   let t = CONFIG.fadeSegundos + 0.1;
   after(t, () => {
-    rig.position.set(0.8, 6.03, -0.5);
+    rig.position.copy(P0);
     rig.rotation.y = 0;
     resetLook(0.12);
     state.phase = 'work';
@@ -617,11 +744,68 @@ function authorize() {
   t += CONFIG.fadeSegundos + CONFIG.trabajoSegundos;
   after(t, () => { state.phase = 'shake'; anim.shake0 = nowS(); creak(); logEv('remecido'); renderUI(); });
   t += CONFIG.remecidoSegundos;
-  after(t, () => { state.phase = 'lean'; anim.lean0 = nowS(); logEv('colapso'); });
-  t += 0.35;
-  after(t, () => fadeTo(1, 0.3));
-  t += 0.45;
-  after(t, () => { anim.collapsed = true; goDebrief('colapso', true); });
+  if (CONFIG.modoCaida === 'visible') {
+    after(t, startCollapse);
+  } else {
+    after(t, () => { state.phase = 'lean'; anim.lean0 = nowS(); logEv('colapso'); });
+    t += 0.35;
+    after(t, () => fadeTo(1, 0.3));
+    t += 0.45;
+    after(t, () => { anim.collapsed = true; anim.finalAngle = CONFIG.inclinacionRad; goDebrief('colapso', true); });
+  }
+}
+
+/* --- Colapso con caída visible ---
+   1) 'collapse': el andamio vuelca sobre sus pies delanteros y el trabajador viaja con la plataforma.
+   2) 'fall': al superar el ángulo de desprendimiento pierde el apoyo y cae libremente (g = 9.8 m/s²)
+      con la velocidad que llevaba la plataforma.
+   3) 'impact': al tocar suelo, corte inmediato a negro + golpe sordo (sin cuerpo ni imágenes gráficas). */
+function collapseAngle(n) {
+  const t = n - anim.collapse0;
+  return Math.min(CONFIG.anguloMaxRad, 0.02 + 0.5 * CONFIG.alfaColapso * t * t);
+}
+function startCollapse() {
+  anim.collapse0 = nowS();
+  state.phase = 'collapse';
+  logEv('colapso');
+  clang();
+  renderUI();
+}
+function updateFall(n) {
+  if (state.phase === 'collapse') {
+    const t = n - anim.collapse0, th = collapseAngle(n), c = Math.cos(th), s = Math.sin(th);
+    const y = P0.y * c - P0.z * s, z = P0.y * s + P0.z * c;
+    rig.position.set(P0.x, y, z);
+    if (th >= CONFIG.anguloDesprendimientoRad) {
+      const w = CONFIG.alfaColapso * t;
+      const vy = w * (-P0.y * s - P0.z * c), vz = w * (P0.y * c - P0.z * s);
+      anim.fall = { y0: y, z0: z, vy, vz, t0: n };
+      const tau = (vy + Math.sqrt(vy * vy + 19.6 * y)) / 9.8;
+      state.phase = 'fall';
+      logEv('caida');
+      vigTarget = 0.85;
+      whoosh(tau);
+      renderUI();
+    }
+  } else if (state.phase === 'fall') {
+    const f = anim.fall, tau = n - f.t0;
+    rig.position.y = f.y0 + f.vy * tau - 4.9 * tau * tau;
+    rig.position.z = f.z0 + f.vz * tau;
+    if (rig.position.y <= 0) impact();
+  }
+}
+function impact() {
+  state.phase = 'impact';
+  rig.position.y = 0;
+  fade = { a: 1, b: 1, t0: nowS(), d: 0.001, cur: 1 };
+  vigTarget = 0; vigMat.opacity = 0;
+  stopWhoosh();
+  thud();
+  logEv('impacto');
+  anim.collapsed = true;
+  anim.finalAngle = CONFIG.anguloMaxRad;
+  renderUI();
+  after(CONFIG.negroPostImpactoSeg, () => goDebrief('colapso', true));
 }
 
 function computeResult(outcome) {
@@ -632,7 +816,7 @@ function computeResult(outcome) {
   const falsos = HIT.filter(h => !h.defectId && state.marks.has(h.id)).length;
   const struct = items.filter(i => i.estructural), noStruct = items.filter(i => !i.estructural);
   const structFound = struct.filter(i => i.found).length;
-  const noStructFound = noStruct.filter(i => i.found).length;
+  const noStructFound = noStruct.filter(i => !i.estructural && i.found).length;
   const max = struct.length * 2 + noStruct.length;
   let puntaje = Math.round(100 * (structFound * 2 + noStructFound) / max) - CONFIG.penalizacionFalsoPositivo * falsos;
   if (outcome === 'colapso') puntaje = Math.round(puntaje * CONFIG.factorPuntajeSiColapsa);
@@ -656,7 +840,13 @@ function computeResult(outcome) {
     titulo = 'Subiste con defectos estructurales sin detectar';
     mensaje = 'El andamio cedió. Revisa abajo qué defectos pasaste por alto y por qué importaban.';
   }
-  return { outcome: tipo, titulo, mensaje, puntaje, items, falsos };
+  let caida = null;
+  if (outcome === 'colapso') {
+    const seg = Math.sqrt(2 * TOP / 9.8), kmh = Math.round(Math.sqrt(2 * 9.8 * TOP) * 3.6);
+    caida = { altura: TOP, seg: +seg.toFixed(1), kmh,
+      texto: 'Caída desde ' + TOP + ' m: unos ' + seg.toFixed(1).replace('.', ',') + ' s en el aire y un impacto a cerca de ' + kmh + ' km/h. Una caída desde esta altura puede causar lesiones graves o la muerte.' };
+  }
+  return { outcome: tipo, titulo, mensaje, puntaje, items, falsos, caida };
 }
 
 function goDebrief(outcome, moved) {
@@ -664,8 +854,8 @@ function goDebrief(outcome, moved) {
   state.phase = 'debrief';
   logEv('resultado', state.result.outcome + ' | puntaje ' + state.result.puntaje);
   if (moved) {
-    rig.position.set(0, 0, 8.5);
-    rig.rotation.y = 0;
+    rig.position.set(-8, 0, 5);
+    rig.rotation.y = faceFrom(-8, 5, 0, 4);
     resetLook(0.18);
   }
   fadeTo(0, 0.8);
@@ -683,6 +873,9 @@ function restart() {
   state.log = [];
   state.t0 = performance.now();
   anim.collapsed = false;
+  anim.fall = null;
+  vigTarget = 0; vigMat.opacity = 0;
+  stopWhoosh();
   fade = { a: 0, b: 0, t0: nowS(), d: 0.001, cur: 0 };
   teleport(2);
   renderUI();
@@ -691,7 +884,9 @@ function restart() {
 
 function sessionPayload() {
   return {
-    escenario: 'andamio_mal_arriostrado_v0',
+    escenario: 'andamio_mal_arriostrado_v1',
+    altura_m: TOP,
+    modo_caida: CONFIG.modoCaida,
     fecha: new Date().toISOString(),
     resultado: state.result ? { tipo: state.result.outcome, puntaje: state.result.puntaje, falsos_positivos: state.result.falsos,
       defectos: state.result.items.map(i => ({ nombre: i.nombre, estructural: i.estructural, detectado: i.found })) } : null,
@@ -720,11 +915,12 @@ const elHelp = document.getElementById('help');
 const elActions = document.getElementById('actions');
 const elModal = document.getElementById('modal');
 const elCard = document.getElementById('card');
-const FASES = { brief: 'Briefing', inspect: 'Inspección previa', climb: 'Subiendo…', work: 'Trabajando en altura', shake: 'Trabajando en altura', lean: '', debrief: 'Resultado' };
+const FASES = { brief: 'Briefing', inspect: 'Inspección previa', climb: 'Subiendo…', work: 'Trabajando en altura', shake: 'Trabajando en altura', lean: '', collapse: '', fall: '', impact: '', debrief: 'Resultado' };
 
 function renderUI() {
   elUI.style.display = state.inXR ? 'none' : 'block';
   elHud.textContent = (FASES[state.phase] || '') + (state.phase === 'inspect' ? '  |  Marcados: ' + state.marks.size : '');
+  elHud.style.display = FASES[state.phase] ? 'block' : 'none';
   elHelp.style.display = state.phase === 'inspect' ? 'block' : 'none';
 
   elActions.innerHTML = '';
@@ -737,7 +933,7 @@ function renderUI() {
   elModal.style.display = 'none';
   if (state.phase === 'brief') {
     elCard.innerHTML = '<h1>Inspección previa de andamio</h1>' +
-      '<p>Tarea: reemplazar una luminaria en la fachada, a unos 6 m de altura, trabajando desde este andamio.</p>' +
+      '<p>Tarea: reemplazar una luminaria en la fachada, a unos ' + TOP + ' m de altura, trabajando desde este andamio.</p>' +
       '<p>Antes de subir, inspecciónalo. Marca todo lo que consideres un defecto. Luego puedes reportar el andamio como no conforme o autorizar la subida.</p>' +
       '<div class="row"><button id="b-start">Iniciar inspección</button></div>' +
       '<small>Prototipo pedagógico. Contenido por validar con un prevencionista.</small>';
@@ -746,7 +942,8 @@ function renderUI() {
   } else if (state.phase === 'debrief' && state.result) {
     const r = state.result;
     elCard.innerHTML = '<h1>' + r.titulo + '</h1>' +
-      '<p class="score">Puntaje provisorio: ' + r.puntaje + '/100</p><p>' + r.mensaje + '</p><ul>' +
+      '<p class="score">Puntaje provisorio: ' + r.puntaje + '/100</p><p>' + r.mensaje + '</p>' +
+      (r.caida ? '<div class="fall">' + r.caida.texto + '</div>' : '') + '<ul>' +
       r.items.map(it => '<li class="' + (it.found ? 'ok' : 'bad') + '"><b>' + (it.found ? '✔ ' : '✘ ') + it.nombre + '</b><span>' + it.porque + '</span></li>').join('') +
       '</ul>' + (r.falsos ? '<p>Marcaste ' + r.falsos + ' elemento(s) correcto(s) como defecto.</p>' : '') +
       '<div class="row"><button id="b-retry">Reintentar</button><button id="b-json" class="sec">Descargar registro (JSON)</button></div>' +
@@ -808,8 +1005,10 @@ function animScaffold() {
     const p = Math.min(1, (n - anim.lean0) / 0.5);
     scaf.rotation.z = 0;
     scaf.rotation.x = CONFIG.inclinacionRad * p * p;
+  } else if (state.phase === 'collapse' || state.phase === 'fall') {
+    scaf.rotation.set(collapseAngle(n), 0, 0);
   } else if (anim.collapsed) {
-    scaf.rotation.set(CONFIG.inclinacionRad, 0, 0);
+    scaf.rotation.set(anim.finalAngle, 0, 0);
   } else {
     scaf.rotation.set(0, 0, 0);
   }
@@ -817,7 +1016,9 @@ function animScaffold() {
 
 renderer.setAnimationLoop(function () {
   processTimers();
+  updateFall(nowS());
   updateFade();
+  updateVig();
   animScaffold();
   updateHover();
   renderer.render(scene, camera);
@@ -833,7 +1034,7 @@ window.addEventListener('resize', () => {
 teleport(2);
 renderUI();
 setupVR();
-window.__sim = { state, CONFIG, DEFECTS };
+window.__sim = { state, CONFIG, DEFECTS, TOP };
 
 })();
 </script>
