@@ -201,6 +201,8 @@ function stube(a, b, r, c) {
   cur.add(m);
   return m;
 }
+const traffic = [];                                   // vehículos en movimiento
+const PF = { pos: [], nor: [], uv: [], idx: [] };     // frondas de palmeras (una sola malla)
 const SPH = new THREE.SphereGeometry(1, 12, 8);
 const HEMI = new THREE.SphereGeometry(1, 14, 6, 0, Math.PI * 2, 0, Math.PI / 2);
 function sell(rx, ry, rz, x, y, z, c, rot) {            // elipsoide
@@ -535,22 +537,59 @@ if (CONFIG.entorno) {
   function car(x, z, ry, c) {
     place(x, 0, z, ry, () => {
       sbox(4.3, 0.65, 1.8, 0, 0.62, 0, c);
-      sell(1.4, 0.44, 0.84, -0.2, 1.17, 0, 0x6f8ca3);
-      sell(1.18, 0.15, 0.72, -0.2, 1.5, 0, c);
-      sell(2.15, 0.2, 0.9, 0, 0.93, 0, c);
+      sell(1.25, 0.34, 0.8, -0.2, 1.12, 0, 0x6f8ca3);
+      sell(1.16, 0.09, 0.78, -0.2, 1.4, 0, c);
+      sell(2.15, 0.22, 0.9, 0, 0.93, 0, c);
       for (const wx of [-1.4, 1.4]) for (const wz of [-0.85, 0.85]) wheel(wx, 0.33, wz, 0.33, 0.25);
     });
   }
-  function palm(x, z, h) {
-    const top = new THREE.Vector3(x + (rnd() - 0.5) * 1.2, h, z);
-    slimb(new THREE.Vector3(x, 0, z), top, 0.26, 0.15, 0x7b5a3a, 10);
-    for (let i = 0; i < 11; i++) {
-      const a = i * Math.PI * 2 / 11 + rnd() * 0.3;
-      const mid = new THREE.Vector3(top.x + Math.cos(a) * 1.4, top.y + 0.35, top.z + Math.sin(a) * 1.4);
-      const end = new THREE.Vector3(top.x + Math.cos(a) * 2.7, top.y - 0.9 - rnd() * 0.6, top.z + Math.sin(a) * 2.7);
-      sblade(top, mid, 0.2, 0x3e7a35);
-      sblade(mid, end, 0.26, i % 2 ? 0x3e7a35 : 0x4b8a3c);
+  function addFrond(top, az, L, lift, droop, W) {
+    const N = 7, base = PF.pos.length / 3;
+    const dir = new THREE.Vector3(Math.cos(az), 0, Math.sin(az));
+    const lat = new THREE.Vector3(-dir.z, 0, dir.x);
+    const pts = [];
+    for (let k = 0; k <= N; k++) {
+      const u = k / N;
+      const c = new THREE.Vector3().copy(top).addScaledVector(dir, L * u);
+      c.y += lift * u - droop * u * u;
+      pts.push(c);
     }
+    for (let k = 0; k <= N; k++) {
+      const u = k / N, c = pts[k];
+      const w = W * Math.sin(Math.PI * (0.1 + 0.82 * u));
+      const t = new THREE.Vector3().subVectors(pts[Math.min(N, k + 1)], pts[Math.max(0, k - 1)]).normalize();
+      const n = new THREE.Vector3().crossVectors(lat, t).normalize();
+      if (n.y < 0) n.negate();
+      [[1, 0], [0, 0.5], [-1, 1]].forEach(([sgn, uu]) => {
+        PF.pos.push(c.x + lat.x * w * sgn, c.y - 0.22 * w * Math.abs(sgn), c.z + lat.z * w * sgn);
+        PF.nor.push(n.x, n.y, n.z);
+        PF.uv.push(uu, u);
+      });
+    }
+    for (let k = 0; k < N; k++) for (let col = 0; col < 2; col++) {
+      const a = base + k * 3 + col, b = a + 1, c2 = a + 3, d = a + 4;
+      PF.idx.push(a, c2, b, b, c2, d);
+    }
+  }
+  function palm(x, z, h) {
+    const lx = (rnd() - 0.5) * 1.6, lz = (rnd() - 0.5) * 1.2;
+    const top = new THREE.Vector3(x + lx, h, z + lz);
+    const bow = new THREE.Vector3((rnd() - 0.5) * 0.5, 0, (rnd() - 0.5) * 0.4);
+    const N = 5, P = [];
+    for (let k = 0; k <= N; k++) {
+      const t = k / N;
+      P.push(new THREE.Vector3(x + lx * t * t + bow.x * Math.sin(Math.PI * t), h * t, z + lz * t * t + bow.z * Math.sin(Math.PI * t)));
+    }
+    for (let k = 0; k < N; k++) slimb(P[k], P[k + 1], 0.27 - 0.12 * (k / N), 0.27 - 0.12 * ((k + 1) / N), 0x8a6a48, 9);
+    for (let k = 1; k < 16; k++) {
+      const t = k / 16, f = t * N, i = Math.min(N - 1, Math.floor(f)), q = f - i;
+      const p = new THREE.Vector3().lerpVectors(P[i], P[i + 1], q), r = 0.285 - 0.12 * t;
+      scyl(r, r, 0.07, p.x, p.y, p.z, 0x6e5236, 9);
+    }
+    sell(0.2, 0.5, 0.2, top.x, top.y - 0.3, top.z, 0x5f7f3c);
+    for (let i = 0; i < 4; i++) sell(0.1, 0.1, 0.1, top.x + Math.cos(i * 1.6) * 0.2, top.y - 0.8, top.z + Math.sin(i * 1.6) * 0.2, 0x5a3d22);
+    for (let i = 0; i < 13; i++) addFrond(top, i * Math.PI * 2 / 13 + rnd() * 0.3, 3.0 + rnd() * 0.9, 0.5 + rnd() * 0.8, 2.2 + rnd() * 1.5, 0.78);
+    for (let i = 0; i < 4; i++) addFrond(top, i * Math.PI / 2 + 0.7 + rnd() * 0.4, 2.3 + rnd() * 0.5, 0.1, 4.8 + rnd(), 0.7);
   }
 
   /* ---- grúa oruga (lado izquierdo, pluma sobre el edificio) ---- */
@@ -649,13 +688,54 @@ if (CONFIG.entorno) {
   worker(12.5, -0.4, -Math.PI / 2, 0xc7e000, { point: true, hat: 0xffffff, skin: 0xd2a07e });                  // supervisor mirando el andamio
 
   /* ---- vehículos en la calle y palmeras ---- */
-  car(-30, 30.8, 0, 0xc0392b);
-  car(-8, 30.8, 0, 0xf2f2f2);
-  car(3, 30.8, 0, 0x8a949c);
-  car(14, 30.8, 0, 0x1f3a5f);
-  car(36, 30.8, 0, 0xf2f2f2);
   for (const x of [-40, -28, -16, -4, 8, 20, 32, 44]) palm(x, 41 + rnd() * 4, 6 + rnd() * 2.5);
   palm(-24, 23, 6); palm(24, 23.5, 7); palm(8, 24, 5.5);
+  (function buildFronds() {
+    const c = document.createElement('canvas'); c.width = 128; c.height = 256;
+    const g = c.getContext('2d');
+    g.lineCap = 'round';
+    g.strokeStyle = '#4d5a2a'; g.lineWidth = 5;
+    g.beginPath(); g.moveTo(64, 256); g.lineTo(64, 4); g.stroke();
+    let q = 4242; const rr = () => { q = (q * 1664525 + 1013904223) >>> 0; return q / 4294967296; };
+    for (let y = 250; y > 6; y -= 4.5) for (const sg of [-1, 1]) {
+      const f = 0.3 + 0.7 * (y / 256), len = 60 * f * (0.85 + rr() * 0.3);
+      const gr = 90 + Math.floor(rr() * 60);
+      g.strokeStyle = 'rgb(' + (40 + Math.floor(rr() * 30)) + ',' + gr + ',' + (30 + Math.floor(rr() * 20)) + ')';
+      g.lineWidth = 3.2;
+      g.beginPath(); g.moveTo(64, y); g.quadraticCurveTo(64 + sg * len * 0.6, y - 12 * f, 64 + sg * len, y - 7 * f + 14 * f); g.stroke();
+    }
+    const tex = new THREE.CanvasTexture(c);
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(PF.pos, 3));
+    geo.setAttribute('normal', new THREE.Float32BufferAttribute(PF.nor, 3));
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(PF.uv, 2));
+    geo.setIndex(PF.idx);
+    geo.computeBoundingSphere();
+    const mat = new THREE.MeshStandardMaterial({ map: tex, alphaTest: 0.35, side: THREE.DoubleSide, roughness: 0.85, color: 0xffffff });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.frustumCulled = false;
+    scene.add(mesh);
+  })();
+
+  /* ---- tráfico en movimiento (dos pistas) ---- */
+  function addVehicle(kind, x0, lane, speed, color) {
+    const tmp = new THREE.Group(), prev = cur;
+    cur = tmp;
+    if (kind === 'car') car(0, 0, 0, color);
+    else if (kind === 'pickup') pickup(0, 0, 0, color);
+    else if (kind === 'dump') dumpTruck(0, 0, 0);
+    else mixerTruck(0, 0, 0);
+    cur = prev;
+    const g = new THREE.Group();
+    mergeInto(g, tmp);
+    const dir = lane > 0 ? 1 : -1;
+    g.position.set(x0, 0, lane > 0 ? 31.6 : 35.4);
+    g.rotation.y = dir > 0 ? 0 : Math.PI;
+    scene.add(g);
+    traffic.push({ g, v: speed * dir, kind, snd: null });
+  }
+  [['car', -70, 1, 9, 0xc0392b], ['pickup', -35, 1, 8, 0xf2f2f2], ['car', 5, 1, 10, 0x1f3a5f], ['dump', 40, 1, 7, 0], ['car', 70, 1, 9.5, 0x8a949c],
+   ['car', 60, -1, 9, 0xf2f2f2], ['car', 20, -1, 10, 0x2f6fb0], ['mixer', -15, -1, 7, 0], ['car', -50, -1, 9, 0xd8a31a]].forEach(a => addVehicle(a[0], a[1], a[2], a[3], a[4]));
 }
 
 mergeInto(scene, siteG);   // todo lo estático del entorno, fusionado por material
@@ -839,10 +919,18 @@ const grips = [renderer.xr.getControllerGrip(0), renderer.xr.getControllerGrip(1
   scene.add(arm);
   bodyArms.push(arm);
 });
+const gripHand = [null, null];                       // 'left' | 'right' según informa cada control
+grips.forEach((g, i) => g.addEventListener('connected', e => {
+  gripHand[i] = e.data && e.data.handedness;
+  if (renderer.xr.isPresenting) setHandParents(true);
+}));
 function setHandParents(xr) {
-  bodyHands.forEach((h, i) => {
-    if (xr) { grips[i].add(h); h.rotation.set(-0.35, 0, 0); h.position.set(0, 0, 0); }
-    else { deskMount[i].add(h); h.rotation.set(0, 0, 0); h.position.set(0, 0, 0); }
+  bodyHands.forEach((h, side) => {                   // side 0 = izquierda, 1 = derecha
+    if (xr) {
+      let gi = gripHand.indexOf(side === 0 ? 'left' : 'right');
+      if (gi < 0) gi = side;
+      grips[gi].add(h); h.rotation.set(-0.35, 0, 0); h.position.set(0, 0, 0);
+    } else { deskMount[side].add(h); h.rotation.set(0, 0, 0); h.position.set(0, 0, 0); }
   });
 }
 function chainVisible(o) { while (o) { if (!o.visible) return false; o = o.parent; } return true; }
@@ -1225,7 +1313,138 @@ function refreshHits() {
    ============================================================ */
 let actx = null;
 let whooshNode = null;
-function initAudio() { try { actx = actx || new (window.AudioContext || window.webkitAudioContext)(); if (actx.state === 'suspended') actx.resume(); } catch (e) {} }
+function initAudio() { try { actx = actx || new (window.AudioContext || window.webkitAudioContext)(); if (actx.state === 'suspended') actx.resume(); startAmbient(); } catch (e) {} }
+['pointerdown', 'keydown', 'touchstart'].forEach(ev => window.addEventListener(ev, () => initAudio(), { once: true, passive: true }));
+
+/* ---- ambiente de ciudad y obra (todo sintetizado; se atenúa durante la caída) ---- */
+let amb = null;
+function brownBuf(sec) {
+  const b = actx.createBuffer(1, Math.floor(actx.sampleRate * sec), actx.sampleRate), d = b.getChannelData(0);
+  let last = 0;
+  for (let i = 0; i < d.length; i++) { last = (last + 0.02 * (Math.random() * 2 - 1)) / 1.02; d[i] = last * 3.5; }
+  return b;
+}
+function mkPanner(x, y, z, ref) {
+  const p = actx.createPanner();
+  p.panningModel = 'equalpower'; p.distanceModel = 'inverse';
+  p.refDistance = ref || 4; p.rolloffFactor = 1.1;
+  if (p.positionX) { p.positionX.value = x; p.positionY.value = y; p.positionZ.value = z; } else p.setPosition(x, y, z);
+  return p;
+}
+function setPannerPos(p, x, y, z) { if (p.positionX) { p.positionX.value = x; p.positionY.value = y; p.positionZ.value = z; } else p.setPosition(x, y, z); }
+function startAmbient() {
+  if (!actx || amb) return;
+  const master = actx.createGain(); master.gain.value = 0;
+  master.connect(actx.destination);
+  master.gain.linearRampToValueAtTime(1, actx.currentTime + 2.5);
+  amb = { master, level: 1 };
+  const brown = brownBuf(6), white = noiseBuf(3);
+  const loop = (buf) => { const s = actx.createBufferSource(); s.buffer = buf; s.loop = true; s.start(); return s; };
+  // lecho de ciudad lejana
+  { const s = loop(brown), f = actx.createBiquadFilter(), g = actx.createGain();
+    f.type = 'lowpass'; f.frequency.value = 520; g.gain.value = 0.16; s.connect(f); f.connect(g); g.connect(master);
+    const s2 = loop(white), f2 = actx.createBiquadFilter(), g2 = actx.createGain(), lfo = actx.createOscillator(), lg = actx.createGain();
+    f2.type = 'bandpass'; f2.frequency.value = 1400; f2.Q.value = 0.6; g2.gain.value = 0.012;
+    lfo.frequency.value = 0.07; lg.gain.value = 0.008; lfo.connect(lg); lg.connect(g2.gain); lfo.start();
+    s2.connect(f2); f2.connect(g2); g2.connect(master); }
+  // generador (derecha)
+  { const p = mkPanner(23, 1, -0.5, 3), g = actx.createGain(); g.gain.value = 0.16;
+    [55, 110.5, 165].forEach((fr, i) => { const o = actx.createOscillator(), og = actx.createGain(); o.type = i ? 'triangle' : 'sawtooth'; o.frequency.value = fr; og.gain.value = 0.5 / (i + 1); o.connect(og); og.connect(g); o.start(); });
+    const lp = actx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 320; g.connect(lp); lp.connect(p); p.connect(master); }
+  // grúa / maquinaria (izquierda)
+  { const p = mkPanner(-19, 2, -6, 5), s = loop(brown), f = actx.createBiquadFilter(), g = actx.createGain();
+    f.type = 'lowpass'; f.frequency.value = 180; g.gain.value = 0.5; s.connect(f); f.connect(g); g.connect(p); p.connect(master); }
+  // vehículos en movimiento
+  traffic.forEach(t => {
+    const p = mkPanner(t.g.position.x, 1, t.g.position.z, 7), s = loop(brown), f = actx.createBiquadFilter(), g = actx.createGain();
+    f.type = 'lowpass'; f.frequency.value = t.kind === 'car' || t.kind === 'pickup' ? 650 : 380; g.gain.value = t.kind === 'car' ? 0.55 : 0.9;
+    s.connect(f); f.connect(g); g.connect(p); p.connect(master);
+    t.snd = p;
+  });
+  // golpes de martillo (lado izquierdo)
+  const hammer = () => {
+    if (!amb) return;
+    try {
+      const t0 = actx.currentTime, p = mkPanner(-17, 1.2, 10, 4), n = 3 + Math.floor(Math.random() * 6);
+      p.connect(master);
+      for (let i = 0; i < n; i++) {
+        const t = t0 + i * (0.42 + Math.random() * 0.06), o = actx.createOscillator(), g = actx.createGain();
+        o.type = 'square'; o.frequency.setValueAtTime(900 + Math.random() * 300, t); o.frequency.exponentialRampToValueAtTime(420, t + 0.07);
+        g.gain.setValueAtTime(0.16, t); g.gain.exponentialRampToValueAtTime(0.0008, t + 0.12);
+        o.connect(g); g.connect(p); o.start(t); o.stop(t + 0.14);
+      }
+    } catch (e) {}
+    setTimeout(hammer, 3500 + Math.random() * 5000);
+  };
+  setTimeout(hammer, 1500);
+  // sierra circular / esmeril (derecha)
+  const saw = () => {
+    if (!amb) return;
+    try {
+      const t0 = actx.currentTime, dur = 1.6 + Math.random() * 1.5, p = mkPanner(19, 1.2, -6.5, 4), o = actx.createOscillator(), g = actx.createGain(), f = actx.createBiquadFilter();
+      p.connect(master);
+      o.type = 'sawtooth'; o.frequency.setValueAtTime(1500, t0); o.frequency.linearRampToValueAtTime(2900, t0 + 0.5); o.frequency.setValueAtTime(2900, t0 + dur - 0.3); o.frequency.linearRampToValueAtTime(900, t0 + dur);
+      f.type = 'bandpass'; f.frequency.value = 2400; f.Q.value = 0.8;
+      g.gain.setValueAtTime(0.0001, t0); g.gain.linearRampToValueAtTime(0.07, t0 + 0.4); g.gain.setValueAtTime(0.07, t0 + dur - 0.3); g.gain.linearRampToValueAtTime(0.0001, t0 + dur);
+      o.connect(f); f.connect(g); g.connect(p); o.start(t0); o.stop(t0 + dur + 0.05);
+    } catch (e) {}
+    setTimeout(saw, 9000 + Math.random() * 12000);
+  };
+  setTimeout(saw, 5000);
+  // alarma de retroceso del camión
+  const beeper = () => {
+    if (!amb) return;
+    try {
+      const t0 = actx.currentTime, p = mkPanner(17, 2, 21.5, 5), n = 6 + Math.floor(Math.random() * 6);
+      p.connect(master);
+      for (let i = 0; i < n; i++) {
+        const t = t0 + i * 0.8, o = actx.createOscillator(), g = actx.createGain();
+        o.type = 'square'; o.frequency.value = 1000;
+        g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(0.045, t + 0.01); g.gain.setValueAtTime(0.045, t + 0.4); g.gain.linearRampToValueAtTime(0.0001, t + 0.42);
+        o.connect(g); g.connect(p); o.start(t); o.stop(t + 0.45);
+      }
+    } catch (e) {}
+    setTimeout(beeper, 14000 + Math.random() * 14000);
+  };
+  setTimeout(beeper, 8000);
+  // bocina lejana en la calle
+  const horn = () => {
+    if (!amb) return;
+    try {
+      const t0 = actx.currentTime, p = mkPanner((Math.random() - 0.5) * 80, 1, 34, 8), dur = 0.25 + Math.random() * 0.3;
+      p.connect(master);
+      [415, 523].forEach(fr => { const o = actx.createOscillator(), g = actx.createGain(); o.type = 'sawtooth'; o.frequency.value = fr; g.gain.setValueAtTime(0.0001, t0); g.gain.linearRampToValueAtTime(0.03, t0 + 0.03); g.gain.setValueAtTime(0.03, t0 + dur); g.gain.linearRampToValueAtTime(0.0001, t0 + dur + 0.05); o.connect(g); g.connect(p); o.start(t0); o.stop(t0 + dur + 0.1); });
+    } catch (e) {}
+    setTimeout(horn, 15000 + Math.random() * 25000);
+  };
+  setTimeout(horn, 12000);
+}
+const _fw = new THREE.Vector3(), _ps = new THREE.Vector3();
+function updateAudio() {
+  if (!actx || !amb) return;
+  const L = actx.listener;
+  camera.getWorldPosition(_ps);
+  camera.getWorldDirection(_fw);
+  if (L.positionX) {
+    L.positionX.value = _ps.x; L.positionY.value = _ps.y; L.positionZ.value = _ps.z;
+    L.forwardX.value = _fw.x; L.forwardY.value = _fw.y; L.forwardZ.value = _fw.z;
+    L.upX.value = 0; L.upY.value = 1; L.upZ.value = 0;
+  } else { L.setPosition(_ps.x, _ps.y, _ps.z); L.setOrientation(_fw.x, _fw.y, _fw.z, 0, 1, 0); }
+  const ph = state.phase;
+  const target = ph === 'impact' ? 0.04 : (ph === 'fall' || ph === 'collapse') ? 0.3 : ph === 'shake' ? 0.6 : 1;
+  if (amb.level !== target) { amb.level = target; amb.master.gain.setTargetAtTime(target, actx.currentTime, 0.25); }
+}
+let _lastT = nowS();
+function trafficUpdate() {
+  const n = nowS(), dt = Math.min(0.1, n - _lastT);
+  _lastT = n;
+  for (const t of traffic) {
+    t.g.position.x += t.v * dt;
+    if (t.v > 0 && t.g.position.x > 95) t.g.position.x = -95;
+    if (t.v < 0 && t.g.position.x < -95) t.g.position.x = 95;
+    if (t.snd) setPannerPos(t.snd, t.g.position.x, 1, t.g.position.z);
+  }
+}
 function noiseBuf(sec) {
   const b = actx.createBuffer(1, Math.floor(actx.sampleRate * sec), actx.sampleRate);
   const d = b.getChannelData(0);
@@ -1642,6 +1861,8 @@ renderer.setAnimationLoop(function () {
   updateVig();
   animScaffold();
   updateBody();
+  trafficUpdate();
+  updateAudio();
   updateHover();
   renderer.render(scene, camera);
 });
