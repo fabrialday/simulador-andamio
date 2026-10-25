@@ -136,7 +136,24 @@ sun.position.set(6, 14, 10);
 scene.add(sun);
 
 /* Suelo */
-const ground = new THREE.Mesh(new THREE.PlaneGeometry(400, 245), new THREE.MeshStandardMaterial({ color: 0xa8966f, roughness: 1 }));
+const gtex = (() => {
+  const c = document.createElement('canvas'); c.width = c.height = 256;
+  const g = c.getContext('2d');
+  g.fillStyle = '#a8966f'; g.fillRect(0, 0, 256, 256);
+  let q = 777; const r = () => { q = (q * 1664525 + 1013904223) >>> 0; return q / 4294967296; };
+  for (let i = 0; i < 2600; i++) {
+    const v = Math.floor(120 + r() * 80);
+    g.fillStyle = 'rgba(' + v + ',' + Math.floor(v * 0.9) + ',' + Math.floor(v * 0.68) + ',' + (0.12 + r() * 0.25) + ')';
+    g.fillRect(r() * 256, r() * 256, 1 + r() * 4, 1 + r() * 3);
+  }
+  for (let i = 0; i < 40; i++) { g.fillStyle = 'rgba(70,60,45,' + (0.05 + r() * 0.08) + ')'; g.beginPath(); g.ellipse(r() * 256, r() * 256, 6 + r() * 18, 3 + r() * 9, r() * 3, 0, 7); g.fill(); }
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(70, 43);
+  if (renderer.capabilities && renderer.capabilities.getMaxAnisotropy) t.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy());
+  return t;
+})();
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(400, 245), new THREE.MeshStandardMaterial({ color: 0xffffff, map: gtex, roughness: 1 }));
 ground.rotation.x = -Math.PI / 2;
 ground.position.set(0, 0, -47.5);
 scene.add(ground);
@@ -183,6 +200,54 @@ function stube(a, b, r, c) {
   m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().normalize());
   cur.add(m);
   return m;
+}
+const SPH = new THREE.SphereGeometry(1, 12, 8);
+const HEMI = new THREE.SphereGeometry(1, 14, 6, 0, Math.PI * 2, 0, Math.PI / 2);
+function sell(rx, ry, rz, x, y, z, c, rot) {            // elipsoide
+  const m = new THREE.Mesh(SPH, M(c));
+  m.scale.set(rx, ry, rz);
+  m.position.set(x, y, z);
+  if (rot) m.rotation.set(rot[0] || 0, rot[1] || 0, rot[2] || 0);
+  cur.add(m);
+  return m;
+}
+function shemi(rx, ry, rz, x, y, z, c) {                // media esfera (casco)
+  const m = new THREE.Mesh(HEMI, M(c));
+  m.scale.set(rx, ry, rz);
+  m.position.set(x, y, z);
+  cur.add(m);
+  return m;
+}
+function slimb(a, b, r1, r2, c, seg) {                  // extremidad cónica con rótula en el extremo
+  const dir = new THREE.Vector3().subVectors(b, a);
+  const len = dir.length();
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(r2, r1, len, seg || 10), M(c));
+  m.position.copy(a).addScaledVector(dir, 0.5);
+  m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.normalize());
+  cur.add(m);
+  sell(r2, r2, r2, b.x, b.y, b.z, c);
+  return m;
+}
+function strunk(y0, y1, r0, r1, zs, x, z, c) {          // tronco de sección elíptica
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(r1, r0, y1 - y0, 14), M(c));
+  m.scale.z = zs;
+  m.position.set(x, (y0 + y1) / 2, z);
+  cur.add(m);
+  return m;
+}
+function sblade(a, b, w, c) {                           // hoja plana (fronda)
+  const len = a.distanceTo(b);
+  const m = new THREE.Mesh(SPH, M(c));
+  m.scale.set(w, 0.018, len / 2);
+  m.position.copy(a).add(b).multiplyScalar(0.5);
+  m.lookAt(b);
+  cur.add(m);
+  return m;
+}
+function wheel(x, y, z, r, w) {
+  scyl(r, r, w, x, y, z, 0x181818, 18, Math.PI / 2);
+  scyl(r * 0.56, r * 0.56, w + 0.03, x, y, z, 0xaeb4ba, 14, Math.PI / 2);
+  scyl(r * 0.2, r * 0.2, w + 0.06, x, y, z, 0x3a3f45, 8, Math.PI / 2);
 }
 function place(x, y, z, ry, fn) {
   const g = new THREE.Group();
@@ -400,25 +465,56 @@ if (CONFIG.entorno) {
       sbox(1.4, 0.4, 0.05, 0, 6.8, 0.12, 0xfff3b0);
     });
   }
-  function worker(x, z, ry, vest) {
+  function worker(x, z, ry, vest, o) {
+    o = o || {};
+    const skin = o.skin || 0xc99a7a, pants = o.pants || 0x2f3e5c, shirt = o.shirt || 0x59626e, hat = o.hat || 0xf2f2f2, glove = o.glove || 0xe0b020;
+    const boot = 0x3a2a1c, sole = 0x141414;
     place(x, 0, z, ry, () => {
-      sbox(0.17, 0.85, 0.22, -0.1, 0.43, 0, 0x2f3e5c);
-      sbox(0.17, 0.85, 0.22, 0.1, 0.43, 0, 0x2f3e5c);
-      sbox(0.2, 0.09, 0.28, -0.1, 0.045, -0.04, 0x4a3322);
-      sbox(0.2, 0.09, 0.28, 0.1, 0.045, -0.04, 0x4a3322);
-      sbox(0.46, 0.62, 0.26, 0, 1.15, 0, vest);
-      sbox(0.47, 0.06, 0.27, 0, 1.15, 0, 0xdddddd);
-      sbox(0.12, 0.6, 0.14, -0.3, 1.12, 0, vest);
-      sbox(0.12, 0.6, 0.14, 0.3, 1.12, 0, vest);
-      scyl(0.1, 0.1, 0.2, 0, 1.58, 0, 0xc99a7a, 8);
-      scyl(0.12, 0.15, 0.11, 0, 1.72, 0, 0xf2f2f2, 8);
+      for (const sg of [-1, 1]) {
+        sell(0.054, 0.012, 0.135, sg * 0.095, 0.012, 0.05, sole);
+        sell(0.05, 0.04, 0.12, sg * 0.095, 0.045, 0.055, boot);
+        sell(0.046, 0.03, 0.045, sg * 0.095, 0.04, 0.13, 0x9aa0a6);
+        slimb(V(sg * 0.095, 0.05, 0.0), V(sg * 0.095, 0.17, 0.0), 0.056, 0.05, boot);
+        slimb(V(sg * 0.095, 0.15, 0.0), V(sg * 0.1, 0.5, 0.012), 0.05, 0.068, pants);
+        slimb(V(sg * 0.1, 0.5, 0.012), V(sg * 0.09, 0.95, 0.0), 0.068, 0.088, pants);
+      }
+      sell(0.2, 0.13, 0.125, 0, 0.98, 0, pants);
+      strunk(0.98, 1.5, 0.175, 0.2, 0.62, 0, 0, shirt);
+      strunk(1.0, 1.46, 0.187, 0.212, 0.64, 0, 0.002, vest);
+      strunk(1.12, 1.17, 0.199, 0.201, 0.64, 0, 0.002, 0xdedede);
+      strunk(1.30, 1.35, 0.207, 0.209, 0.64, 0, 0.002, 0xdedede);
+      sell(0.06, 0.07, 0.04, 0.085, 1.42, 0.115, 0x2b2f33);    // bolsillo / radio
+      for (const sg of [-1, 1]) {
+        const S = V(sg * 0.22, 1.45, 0), pt = o.point && sg === 1;
+        const E = pt ? V(0.31, 1.3, 0.2) : V(sg * 0.275, 1.18, 0.03);
+        const W = pt ? V(0.28, 1.36, 0.42) : V(sg * 0.265, 0.95, 0.13);
+        sell(0.07, 0.07, 0.07, S.x, S.y, S.z, shirt);
+        slimb(S, E, 0.052, 0.042, shirt);
+        slimb(E, W, 0.042, 0.033, shirt);
+        const gdir = pt ? V(0, 0.01, 0.07) : V(0, -0.065, 0.015);
+        sell(0.034, pt ? 0.034 : 0.058, pt ? 0.058 : 0.034, W.x + gdir.x, W.y + gdir.y, W.z + gdir.z, glove);
+        sell(0.037, 0.02, 0.037, W.x, W.y, W.z, 0x2b2f33);
+      }
+      slimb(V(0, 1.5, 0), V(0, 1.6, 0.008), 0.058, 0.052, skin);
+      sell(0.085, 0.105, 0.097, 0, 1.69, 0.012, skin);
+      sell(0.016, 0.022, 0.022, 0, 1.672, 0.105, skin);
+      for (const sg of [-1, 1]) {
+        sell(0.011, 0.008, 0.006, sg * 0.033, 1.705, 0.092, 0x1b1b1b);
+        sell(0.013, 0.026, 0.019, sg * 0.087, 1.69, 0.012, skin);
+      }
+      if (o.beard) sell(0.07, 0.05, 0.06, 0, 1.63, 0.05, 0x2a211a);
+      shemi(0.108, 0.088, 0.118, 0, 1.715, 0.005, hat);
+      sell(0.1, 0.01, 0.125, 0, 1.718, 0.035, hat);
+      sell(0.082, 0.008, 0.075, 0, 1.722, 0.125, hat);
+      sell(0.012, 0.016, 0.1, 0, 1.8, 0.0, hat);
     });
   }
   function chassisCab() {
     sbox(8, 0.35, 2.4, 0, 0.95, 0, 0x2b2f33);
     sbox(2.0, 2.1, 2.3, 3.2, 2.2, 0, 0xf2f2f2);
     sbox(0.06, 0.9, 1.9, 4.22, 2.7, 0, 0x6f8ca3);
-    for (const wx of [-3.4, -2.0, 3.0]) for (const wz of [-1.2, 1.2]) scyl(0.55, 0.55, 0.4, wx, 0.55, wz, 0x1a1a1a, 12, Math.PI / 2);
+    for (const wx of [-3.4, -2.0, 3.0]) for (const wz of [-1.2, 1.2]) wheel(wx, 0.55, wz, 0.55, 0.4);
+    sell(1.05, 0.2, 1.18, 3.2, 3.22, 0, 0xf2f2f2);
   }
   function dumpTruck(x, z, ry) {
     place(x, 0, z, ry, () => { chassisCab(); sbox(4.8, 1.7, 2.5, -1.4, 2.15, 0, 0xe3a21a); sbox(4.9, 0.1, 2.6, -1.4, 3.05, 0, 0x8a6d12); });
@@ -432,23 +528,28 @@ if (CONFIG.entorno) {
       sbox(1.8, 0.75, 1.8, 0.7, 1.45, 0, c);
       sbox(0.06, 0.6, 1.6, 1.62, 1.5, 0, 0x6f8ca3);
       sbox(0.4, 0.12, 1.2, 0.7, 1.88, 0, 0xff8c00);
-      for (const wx of [-1.5, 1.5]) for (const wz of [-0.95, 0.95]) scyl(0.38, 0.38, 0.3, wx, 0.38, wz, 0x1a1a1a, 10, Math.PI / 2);
+      for (const wx of [-1.5, 1.5]) for (const wz of [-0.95, 0.95]) wheel(wx, 0.38, wz, 0.38, 0.3);
+      sell(0.9, 0.11, 0.92, 0.7, 1.84, 0, c);
     });
   }
   function car(x, z, ry, c) {
     place(x, 0, z, ry, () => {
       sbox(4.3, 0.65, 1.8, 0, 0.62, 0, c);
-      sbox(2.3, 0.55, 1.6, -0.2, 1.2, 0, c);
-      sbox(2.32, 0.38, 1.62, -0.2, 1.22, 0, 0x6f8ca3);
-      for (const wx of [-1.4, 1.4]) for (const wz of [-0.85, 0.85]) scyl(0.33, 0.33, 0.25, wx, 0.33, wz, 0x1a1a1a, 10, Math.PI / 2);
+      sell(1.4, 0.44, 0.84, -0.2, 1.17, 0, 0x6f8ca3);
+      sell(1.18, 0.15, 0.72, -0.2, 1.5, 0, c);
+      sell(2.15, 0.2, 0.9, 0, 0.93, 0, c);
+      for (const wx of [-1.4, 1.4]) for (const wz of [-0.85, 0.85]) wheel(wx, 0.33, wz, 0.33, 0.25);
     });
   }
   function palm(x, z, h) {
     const top = new THREE.Vector3(x + (rnd() - 0.5) * 1.2, h, z);
-    stube(new THREE.Vector3(x, 0, z), top, 0.2, 0x7b5a3a);
-    for (let i = 0; i < 8; i++) {
-      const a = i * Math.PI / 4 + rnd() * 0.4;
-      stube(top, new THREE.Vector3(top.x + Math.cos(a) * 2.6, top.y - 0.9 - rnd() * 0.5, top.z + Math.sin(a) * 2.6), 0.07, 0x3e7a35);
+    slimb(new THREE.Vector3(x, 0, z), top, 0.26, 0.15, 0x7b5a3a, 10);
+    for (let i = 0; i < 11; i++) {
+      const a = i * Math.PI * 2 / 11 + rnd() * 0.3;
+      const mid = new THREE.Vector3(top.x + Math.cos(a) * 1.4, top.y + 0.35, top.z + Math.sin(a) * 1.4);
+      const end = new THREE.Vector3(top.x + Math.cos(a) * 2.7, top.y - 0.9 - rnd() * 0.6, top.z + Math.sin(a) * 2.7);
+      sblade(top, mid, 0.2, 0x3e7a35);
+      sblade(mid, end, 0.26, i % 2 ? 0x3e7a35 : 0x4b8a3c);
     }
   }
 
@@ -501,8 +602,8 @@ if (CONFIG.entorno) {
   sbox(2.4, 0.12, 2.4, -7.5, 2.46, 23.5, 0x2b2f33);
   sbox(1.2, 0.8, 0.06, -7.5, 1.5, 24.62, 0x6f8ca3);
   place(-23, 0, 2, 0, () => { sbox(5, 1.3, 2.1, 0, 0.75, 0, 0x3a8f4f); sbox(4.6, 0.04, 1.7, 0, 1.42, 0, 0x1f5b30); });   // volquete de escombros
-  scyl(0.3, 3.2, 2.2, -16, 1.1, -11, 0xc9b27c, 9);              // arena
-  scyl(0.3, 2.8, 1.9, -20.5, 0.95, -13, 0x8b8a86, 9);           // ripio
+  sell(3.3, 2.2, 3.3, -16, 0, -11, 0xc9b27c); sell(1.8, 1.1, 1.6, -14.5, 0, -10, 0xc9b27c);              // arena
+  sell(2.9, 1.9, 2.9, -20.5, 0, -13, 0x8b8a86); sell(1.6, 1.0, 1.5, -19, 0, -12, 0x8b8a86);           // ripio
   for (let i = 0; i < 5; i++) scyl(0.29, 0.29, 0.88, -23.5 + (i % 2) * 0.7, 0.44, 7 + i * 0.75, i % 2 ? 0x2e6fb5 : 0x3a8f4f, 10);
   lightTower(-14, 15);
 
@@ -540,12 +641,12 @@ if (CONFIG.entorno) {
   for (const [x, z] of [[8, 16], [8.8, 16.6], [-5.5, 12], [5.5, 12]]) cone(x, z);
 
   /* ---- personal ---- */
-  worker(-17, 9.6, 0.5, 0xff7a00);
-  worker(-13.5, 9.8, -0.8, 0xc7e000);
-  worker(17.5, 9, 2.2, 0xff7a00);
-  worker(19, -6.5, 1, 0xc7e000);
-  worker(-14, -3, 0.3, 0xff7a00);
-  worker(12.5, -0.4, -Math.PI / 2, 0xc7e000);                  // supervisor mirando el andamio
+  worker(-17, 9.6, 0.5, 0xff7a00, { skin: 0xb98562, shirt: 0x4a5a6e });
+  worker(-13.5, 9.8, -0.8, 0xc7e000, { skin: 0xd8ad8c, hat: 0xf2c500, beard: true, pants: 0x3b3f46 });
+  worker(17.5, 9, 2.2, 0xff7a00, { skin: 0x9a6a4a, hat: 0xff8c00, shirt: 0x6a4a3a });
+  worker(19, -6.5, 1, 0xc7e000, { skin: 0xc99a7a, pants: 0x4a4f3a, beard: true });
+  worker(-14, -3, 0.3, 0xff7a00, { skin: 0xbf8f6b, hat: 0xf2c500, shirt: 0x3a4658 });
+  worker(12.5, -0.4, -Math.PI / 2, 0xc7e000, { point: true, hat: 0xffffff, skin: 0xd2a07e });                  // supervisor mirando el andamio
 
   /* ---- vehículos en la calle y palmeras ---- */
   car(-30, 30.8, 0, 0xc0392b);
@@ -637,58 +738,103 @@ VANT.forEach((v, i) => {
    Manos con guantes, pecho con chaleco reflectante, piernas y zapatos de seguridad
    (cuero, puntera de acero, suela antideslizante). Se ve al mirar hacia abajo.
    ============================================================ */
-const BODY = { pants: 0x2f3e5c, vest: 0xff7a00, band: 0xe2e2e2, sleeve: 0x5a6b7a, leather: 0x4a3322, sole: 0x161616, cap: 0xa7adb3, glove: 0xd9a441, cuff: 0x2b2f33, reflect: 0xe8e65a };
+const BODY = { pants: 0x2b3a57, vest: 0xff7a00, band: 0xe2e2e2, shirt: 0x3a4658, leather: 0x4a3322, sole: 0x161616, cap: 0xa7adb3, glove: 0xf0c419, pad: 0x1d1f22, cuff: 0x2b2f33, reflect: 0xe8e65a };
 const bmat = {};
-function BM(c) { return bmat[c] || (bmat[c] = new THREE.MeshStandardMaterial({ color: c, roughness: 0.85, metalness: 0.05 })); }
-function bbox(parent, w, h, d, x, y, z, c) {
-  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), BM(c));
+function BM(c) { return bmat[c] || (bmat[c] = new THREE.MeshStandardMaterial({ color: c, roughness: 0.8, metalness: 0.04 })); }
+const BSPH = new THREE.SphereGeometry(1, 16, 12);
+function bell(parent, rx, ry, rz, x, y, z, c) {
+  const m = new THREE.Mesh(BSPH, BM(c));
+  m.scale.set(rx, ry, rz);
+  m.position.set(x, y, z);
+  parent.add(m);
+  return m;
+}
+function bcyl(parent, rt, rb, h, x, y, z, c, seg) {
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, h, seg || 14), BM(c));
   m.position.set(x, y, z);
   parent.add(m);
   return m;
 }
 const body = new THREE.Group();
 scene.add(body);
-const bodyLegs = [], bodyArms = [], bodyHands = [];
+const bodyLegs = [], bodyArms = [], bodyHands = [], bodyShoulders = [];
 let bodyYaw = 0;
 for (const sx of [-1, 1]) {
-  bodyLegs.push(bbox(body, 0.14, 1, 0.17, sx * 0.09, 0.5, 0.0, BODY.pants));
+  bodyLegs.push(bcyl(body, 0.078, 0.056, 1, sx * 0.09, 0.5, 0.0, BODY.pants));
   const shoe = new THREE.Group();
   shoe.position.set(sx * 0.1, 0, -0.16);
   body.add(shoe);
-  bbox(shoe, 0.105, 0.025, 0.30, 0, 0.0125, -0.03, BODY.sole);       // suela
-  bbox(shoe, 0.10, 0.085, 0.27, 0, 0.0675, -0.04, BODY.leather);     // cuero
-  bbox(shoe, 0.095, 0.06, 0.09, 0, 0.055, -0.175, BODY.cap);         // puntera de acero
-  bbox(shoe, 0.10, 0.10, 0.09, 0, 0.09, 0.05, BODY.leather);         // caña
-  bbox(shoe, 0.104, 0.02, 0.05, 0, 0.115, 0.05, BODY.reflect);       // banda reflectante
+  bell(shoe, 0.058, 0.014, 0.155, 0, 0.014, -0.03, BODY.sole);       // suela
+  bell(shoe, 0.054, 0.05, 0.135, 0, 0.058, -0.04, BODY.leather);     // cuero
+  bell(shoe, 0.05, 0.036, 0.06, 0, 0.046, -0.145, BODY.cap);         // puntera de acero
+  bcyl(shoe, 0.05, 0.054, 0.1, 0, 0.12, 0.02, BODY.leather);         // caña
+  bcyl(shoe, 0.056, 0.056, 0.02, 0, 0.14, 0.02, BODY.reflect);       // banda reflectante
 }
-const bodyHips = bbox(body, 0.32, 0.18, 0.2, 0, 0.9, 0.05, BODY.pants);
-const bodyTorso = bbox(body, 0.40, 1, 0.22, 0, 1.2, 0.06, BODY.vest);
-const bodyBandA = bbox(body, 0.405, 0.05, 0.225, 0, 1.1, 0.06, BODY.band);
-const bodyBandB = bbox(body, 0.405, 0.05, 0.225, 0, 1.3, 0.06, BODY.band);
+const bodyHips = bell(body, 0.175, 0.1, 0.125, 0, 0.9, 0.05, BODY.pants);
+const bodyTorso = bcyl(body, 0.2, 0.16, 1, 0, 1.2, 0.06, BODY.vest, 16);
+bodyTorso.scale.z = 0.62;
+const bodyBandA = bcyl(body, 0.177, 0.177, 0.05, 0, 1.1, 0.06, BODY.band, 16);
+const bodyBandB = bcyl(body, 0.193, 0.193, 0.05, 0, 1.3, 0.06, BODY.band, 16);
+bodyBandA.scale.z = bodyBandB.scale.z = 0.62;
+for (const sx of [-1, 1]) bodyShoulders.push(bell(body, 0.078, 0.078, 0.078, sx * 0.215, 1.4, 0.06, BODY.shirt));
 
 function makeHand(sx) {
   const h = new THREE.Group();
-  bbox(h, 0.085, 0.035, 0.10, 0, 0, 0, BODY.glove);                  // palma
-  const f = bbox(h, 0.08, 0.03, 0.075, 0, -0.006, -0.08, BODY.glove); // dedos
-  f.rotation.x = 0.25;
-  const th = bbox(h, 0.03, 0.03, 0.06, -sx * 0.05, -0.004, -0.03, BODY.glove);   // pulgar
-  th.rotation.y = -sx * 0.5;
-  bbox(h, 0.09, 0.045, 0.04, 0, 0, 0.07, BODY.cuff);                 // puño
+  bell(h, 0.044, 0.018, 0.05, 0, 0, 0, BODY.glove);                    // palma
+  bell(h, 0.037, 0.008, 0.032, 0, 0.015, -0.006, BODY.pad);            // protección de nudillos
+  const seg = (parent, r, len, z) => {
+    const m = bcyl(parent, r, r * 0.92, len, 0, 0, z - len / 2, BODY.glove, 8);
+    m.rotation.x = Math.PI / 2;
+  };
+  [[-0.0315, 0.036, 0.4], [-0.0105, 0.042, 0.45], [0.0105, 0.04, 0.45], [0.0315, 0.032, 0.5]].forEach(([fx, L, curl]) => {
+    const f = new THREE.Group();
+    f.position.set(fx, 0.002, -0.046);
+    f.rotation.x = -curl * 0.6;
+    h.add(f);
+    seg(f, 0.0105, L, 0);
+    const f2 = new THREE.Group();
+    f2.position.set(0, 0, -L);
+    f2.rotation.x = -curl;
+    f.add(f2);
+    seg(f2, 0.0098, L * 0.85, 0);
+    bell(f2, 0.0098, 0.0098, 0.0098, 0, 0, -L * 0.85, BODY.glove);
+    bell(f, 0.0105, 0.0105, 0.0105, 0, 0, 0, BODY.glove);
+  });
+  const t = new THREE.Group();                                            // pulgar
+  t.position.set(-sx * 0.036, -0.002, -0.004);
+  t.rotation.set(-0.2, sx * 0.65, 0);
+  h.add(t);
+  seg(t, 0.0125, 0.032, 0);
+  const t2 = new THREE.Group();
+  t2.position.set(0, 0, -0.032);
+  t2.rotation.x = -0.35;
+  t.add(t2);
+  seg(t2, 0.0115, 0.026, 0);
+  bell(t2, 0.0115, 0.0115, 0.0115, 0, 0, -0.026, BODY.glove);
+  const cuff = bcyl(h, 0.04, 0.046, 0.085, 0, 0, 0.1, BODY.glove, 14);   // puño del guante
+  cuff.rotation.x = Math.PI / 2;
+  const band = bcyl(h, 0.0455, 0.0455, 0.014, 0, 0, 0.135, BODY.cuff, 14);
+  band.rotation.x = Math.PI / 2;
   return h;
 }
 const deskMount = [new THREE.Group(), new THREE.Group()];
 const grips = [renderer.xr.getControllerGrip(0), renderer.xr.getControllerGrip(1)];
 [-1, 1].forEach((sx, i) => {
   const hand = makeHand(sx);
-  hand.scale.setScalar(0.8);
   bodyHands.push(hand);
-  deskMount[i].position.set(sx * 0.34, -0.33, -0.62);
-  deskMount[i].rotation.set(0.15, -sx * 0.15, sx * 0.1);
+  deskMount[i].position.set(sx * 0.3, -0.3, -0.58);
+  deskMount[i].rotation.set(0.35, -sx * 0.2, sx * 0.15);
   camera.add(deskMount[i]);
   deskMount[i].add(hand);
   rig.add(grips[i]);
-  const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.026, 1, 8), BM(BODY.sleeve));
-  arm.frustumCulled = false;
+  const arm = new THREE.Group();
+  const upper = new THREE.Mesh(new THREE.CylinderGeometry(0.036, 0.046, 1, 14), BM(BODY.shirt));
+  const fore = new THREE.Mesh(new THREE.CylinderGeometry(0.032, 0.039, 1, 14), BM(BODY.shirt));
+  const elbow = new THREE.Mesh(BSPH, BM(BODY.shirt));
+  elbow.scale.setScalar(0.04);
+  arm.add(upper, fore, elbow);
+  arm.userData = { upper, fore, elbow };
+  arm.traverse(o => { o.frustumCulled = false; });
   scene.add(arm);
   bodyArms.push(arm);
 });
@@ -699,7 +845,14 @@ function setHandParents(xr) {
   });
 }
 function chainVisible(o) { while (o) { if (!o.visible) return false; o = o.parent; } return true; }
-const _b1 = new THREE.Vector3(), _b2 = new THREE.Vector3(), _b3 = new THREE.Vector3(), _b4 = new THREE.Vector3();
+const _b1 = new THREE.Vector3(), _b2 = new THREE.Vector3(), _b3 = new THREE.Vector3(), _b4 = new THREE.Vector3(), _b5 = new THREE.Vector3(), _b6 = new THREE.Vector3(), _b7 = new THREE.Vector3();
+function setSeg(m, A, B) {
+  _b7.subVectors(B, A);
+  const len = _b7.length();
+  m.position.copy(A).addScaledVector(_b7, 0.5);
+  m.scale.set(1, Math.max(len, 0.01), 1);
+  m.quaternion.setFromUnitVectors(UP, _b7.normalize());
+}
 function updateBody() {
   camera.getWorldPosition(_b1);
   const floorY = rig.position.y;
@@ -719,18 +872,30 @@ function updateBody() {
   bodyTorso.position.y = hipY + 0.09 + th / 2;
   bodyBandA.position.y = hipY + 0.09 + th * 0.3;
   bodyBandB.position.y = hipY + 0.09 + th * 0.7;
+  bodyShoulders.forEach(sh => { sh.position.y = shY - 0.04; });
   body.updateMatrixWorld(true);
   [-1, 1].forEach((sx, i) => {
     const arm = bodyArms[i], hand = bodyHands[i];
     if (!chainVisible(hand)) { arm.visible = false; return; }
     arm.visible = true;
-    body.localToWorld(_b3.set(sx * 0.22, shY - 0.04, 0.04));
-    hand.getWorldPosition(_b4);
+    body.localToWorld(_b3.set(sx * 0.215, shY - 0.04, 0.06));          // hombro
+    hand.localToWorld(_b4.set(0, 0, 0.12));                             // muñeca
     _b2.subVectors(_b4, _b3);
-    const len = _b2.length();
-    arm.position.copy(_b3).addScaledVector(_b2, 0.5);
-    arm.scale.set(1, Math.max(len, 0.01), 1);
-    arm.quaternion.setFromUnitVectors(UP, _b2.normalize());
+    const dist = _b2.length(), L1 = 0.3, L2 = 0.29;
+    const dn = _b5.copy(_b2).normalize();
+    const dd = Math.min(dist, (L1 + L2) * 0.995);
+    const a = (L1 * L1 - L2 * L2 + dd * dd) / (2 * dd);
+    const hgt = Math.sqrt(Math.max(0, L1 * L1 - a * a));
+    _b6.set(0, -1, 0);
+    _b7.copy(_b3).sub(body.position); _b7.y = 0; _b7.normalize();
+    _b6.addScaledVector(_b7, 0.55);
+    _b6.addScaledVector(dn, -_b6.dot(dn)).normalize();
+    const E = _b1.copy(_b3).addScaledVector(dn, a).addScaledVector(_b6, hgt);
+    const u = arm.userData;
+    const Ec = E.clone();
+    setSeg(u.upper, _b3, Ec);
+    setSeg(u.fore, Ec, _b4);
+    u.elbow.position.copy(Ec);
   });
 }
 
