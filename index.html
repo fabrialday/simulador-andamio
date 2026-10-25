@@ -829,8 +829,8 @@ const grips = [renderer.xr.getControllerGrip(0), renderer.xr.getControllerGrip(1
   deskMount[i].add(hand);
   rig.add(grips[i]);
   const arm = new THREE.Group();
-  const upper = new THREE.Mesh(new THREE.CylinderGeometry(0.036, 0.046, 1, 14), BM(BODY.shirt));
-  const fore = new THREE.Mesh(new THREE.CylinderGeometry(0.032, 0.039, 1, 14), BM(BODY.shirt));
+  const upper = new THREE.Mesh(new THREE.CylinderGeometry(0.036, 0.05, 1, 14), BM(BODY.shirt));
+  const fore = new THREE.Mesh(new THREE.CylinderGeometry(0.026, 0.04, 1, 14), BM(BODY.shirt));
   const elbow = new THREE.Mesh(BSPH, BM(BODY.shirt));
   elbow.scale.setScalar(0.04);
   arm.add(upper, fore, elbow);
