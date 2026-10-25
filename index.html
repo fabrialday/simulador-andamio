@@ -95,7 +95,7 @@ const P0 = new THREE.Vector3(0.8, TOP + 0.06, -0.5);   // dónde se para el trab
 /* ============================================================
    ESTADO
    ============================================================ */
-const state = { phase: 'brief', marks: new Set(), log: [], t0: performance.now(), result: null, vantage: 2, inXR: false, msg: '' };
+const state = { phase: 'menu', slide: 0, marks: new Set(), log: [], t0: performance.now(), result: null, vantage: 2, inXR: false, msg: '' };
 const anim = { shake0: 0, lean0: 0, collapse0: 0, collapsed: false, finalAngle: CONFIG.inclinacionRad, fall: null };
 const nowS = () => performance.now() / 1000;
 function logEv(type, id) { state.log.push({ t: +((performance.now() - state.t0) / 1000).toFixed(2), tipo: type, id: id || null }); }
@@ -1051,6 +1051,20 @@ function teleport(idx) {
 /* ============================================================
    PANEL VR (canvas en 3D)
    ============================================================ */
+const SLIDES = [
+  { t: 'Trabajo en altura', sub: 'Curso gamificado · Seguridad y salud ocupacional', note: 'Del riesgo a la decisión: teoría y práctica en realidad virtual para trabajar seguro sobre 1,8 metros.' },
+  { t: 'La caída es el riesgo que más mata', big: '30', sub: 'trabajadores murieron en 2024 tras caer desde más de 1,8 m: el 40% de las 76 muertes laborales del año.', note: 'Fuente: SUSESO (mutualidades), citada por Reporte Minero, julio de 2025.' },
+  { t: 'Cómo funciona el curso', items: [['Aprende', 'Microlecciones cortas de teoría, con preguntas al cierre.'], ['Practica', 'Simulador en realidad virtual: inspecciona un andamio y decide si se sube.'], ['Demuestra', 'Evaluación teórica y práctica, con registro de tu resultado.']], note: 'Todo con puntaje, niveles e insignias.' },
+  { t: '¿Qué es trabajo en altura?', big: '1,8 m', sub: 'Posibilidad de caer desde 1,8 metros o más sobre un nivel inferior.', items: [['Menos de 1,8 m también cuenta', 'Si la caída puede causar una lesión grave.'], ['Altura física, no geográfica', 'La geográfica (sobre el nivel del mar) es otro riesgo.']], note: 'Fuente: guía del ISP sobre protección contra caídas, citada por PracticaTest.' },
+  { t: 'Marco normativo en Chile', items: [['DS 44', 'Gestión preventiva de riesgos laborales. Vigente desde el 1 de febrero de 2025; deroga los DS 40 y 54.'], ['DS 44, art. 16', 'Capacitación general en prevención: al menos 8 horas, renovada cada 2 años como máximo.'], ['NCh 998', 'Requisitos de seguridad para andamios. Verificar la edición vigente.'], ['NCh 1258', 'Protección personal contra caídas.']], note: 'Fuentes: ISL y PracticaTest. Contrastar con los textos oficiales.' },
+  { t: 'Primero el riesgo, el arnés al final', items: [['1. Eliminar', 'Hacer la tarea a nivel de suelo.'], ['2. Sustituir', 'Usar un medio más seguro para llegar al trabajo.'], ['3. Ingeniería', 'Barandas, plataformas completas, andamio bien arriostrado.'], ['4. Administrativo', 'Procedimiento, permiso de trabajo, capacitación.'], ['5. Equipo (EPP)', 'Arnés y anclaje: la última barrera, no la primera.']] },
+  { t: 'Tres sistemas, tres funciones', items: [['Restricción', 'Impide llegar a la zona de caída.'], ['Posicionamiento', 'Sostiene al trabajador para trabajar con las manos libres.'], ['Detención', 'Frena la caída una vez que ocurre.']], note: 'Arnés, conectores y anclaje deben ser compatibles y se revisan antes de cada uso.' },
+  { t: 'Antes de subir: 5 revisiones', items: [['Base', 'Placa de apoyo sobre suelo firme. Nada de ladrillos ni calzas improvisadas.'], ['Arriostramiento', 'Diagonales completas en todos los módulos.'], ['Amarres', 'Anclaje a la estructura en cada nivel previsto, también arriba.'], ['Plataformas', 'Todas las tablas colocadas, sin huecos.'], ['Barandas', 'Completas en todo el perímetro de la plataforma.']], note: 'Basado en el escenario del simulador. Por validar con NCh 998.' },
+  { t: 'Regla de oro', big: 'SI HAY DUDA, NO SUBO', sub: 'Inspecciono. Marco lo que está mal. Reporto el andamio como no conforme.' },
+  { t: 'Cómo es la práctica en VR', items: [['Briefing', 'Cambiar una luminaria a 10 m, desde un andamio.'], ['Inspección', 'Recorre el andamio y marca los defectos.'], ['Decisión', 'Reporta no conforme o autoriza la subida.'], ['Resultado', 'Si autorizas con defectos, el andamio cede.'], ['Debrief', 'Qué viste, qué no viste y por qué importaba.']] },
+  { t: 'Gamificación con propósito', items: [['Puntaje', 'Los defectos estructurales suman más. Marcar lo que está bien resta.'], ['Niveles', 'Escenarios de dificultad creciente (propuesta).'], ['Insignias', 'Inspector atento, Cero falsos positivos, Detuvo la tarea (propuesta).'], ['Consecuencia', 'Si autorizas con defectos, la caída es visible.']], note: 'Reglas de puntaje en borrador, por validar con un prevencionista.' },
+  { t: '¡A practicar!', sub: 'Ahora inspecciona un andamio en realidad virtual y decide: ¿se sube o no se sube?', note: 'Fuentes: Reporte Minero (SUSESO), ISL (DS 44), PracticaTest.', last: true }
+];
 const PW = 1024, PH = 1180;
 const pcanvas = document.createElement('canvas');
 pcanvas.width = PW; pcanvas.height = PH;
@@ -1108,13 +1122,62 @@ function drawPanel() {
   c.fillStyle = '#fff';
   const ph = state.phase;
 
-  if (ph === 'brief') {
+  if (ph === 'menu') {
+    c.font = 'bold 54px sans-serif';
+    let y = wrapText(c, 'Capacitación en trabajo en altura', 60, 70, 900, 64);
+    c.font = '32px sans-serif';
+    c.fillStyle = '#b9c4ce';
+    y = wrapText(c, 'Elige cómo quieres empezar.', 60, y + 14, 900, 42);
+    pbtn('Presentación (teoría)', 80, 420, 864, 200, '#2f7de1', startTeoria);
+    pbtn('Curso práctico (simulador)', 80, 680, 864, 200, '#c0592b', startPractico);
+    c.font = '24px sans-serif';
+    c.fillStyle = '#8fa0af';
+    c.fillText('Prototipo pedagógico. Contenido por validar con un prevencionista.', 60, PH - 80);
+  } else if (ph === 'teoria') {
+    const sl = SLIDES[state.slide];
+    c.fillStyle = '#f26a1b';
+    c.font = 'bold 26px sans-serif';
+    c.fillText('PRESENTACIÓN  ·  ' + (state.slide + 1) + ' / ' + SLIDES.length, 60, 36);
+    c.fillStyle = '#fff';
+    c.font = 'bold 52px sans-serif';
+    let y = wrapText(c, sl.t, 60, 84, 900, 62) + 10;
+    if (sl.big) {
+      c.fillStyle = '#f26a1b';
+      c.font = 'bold ' + (sl.big.length > 8 ? 70 : 150) + 'px sans-serif';
+      y = wrapText(c, sl.big, 60, y, 900, sl.big.length > 8 ? 84 : 168) + 6;
+    }
+    if (sl.sub) {
+      c.fillStyle = '#e6ebf0';
+      c.font = '34px sans-serif';
+      y = wrapText(c, sl.sub, 60, y, 900, 44) + 14;
+    }
+    if (sl.items) {
+      for (const it of sl.items) {
+        c.fillStyle = '#f26a1b';
+        c.font = 'bold 34px sans-serif';
+        y = wrapText(c, it[0], 60, y, 900, 40);
+        c.fillStyle = '#c8d0d9';
+        c.font = '28px sans-serif';
+        y = wrapText(c, it[1], 60, y, 900, 36) + 14;
+      }
+    }
+    if (sl.note) {
+      c.fillStyle = '#9fb0c0';
+      c.font = '26px sans-serif';
+      wrapText(c, sl.note, 60, y + 10, 900, 33);
+    }
+    if (state.slide > 0) pbtn('‹ Anterior', 50, PH - 130, 280, 100, '#3a4656', prevSlide);
+    pbtn('Menú', 350, PH - 130, 240, 100, '#3a4656', goMenu);
+    if (sl.last) pbtn('Practicar ›', 610, PH - 130, 364, 100, '#c0592b', startPractico);
+    else pbtn('Siguiente ›', 610, PH - 130, 364, 100, '#2f7de1', nextSlide);
+  } else if (ph === 'brief') {
     c.font = 'bold 48px sans-serif';
     let y = wrapText(c, 'Inspección previa de andamio', 60, 60, 900, 58);
     c.font = '32px sans-serif';
     y = wrapText(c, 'Tarea: reemplazar una luminaria en la fachada, a unos ' + TOP + ' m de altura, trabajando desde este andamio.', 60, y + 20, 900, 42);
     y = wrapText(c, 'Antes de subir, inspecciónalo. Marca todo lo que consideres un defecto. Luego puedes reportarlo como no conforme o autorizar la subida.', 60, y + 20, 900, 42);
     pbtn('Iniciar inspección', 112, 800, 800, 120, '#2f7de1', startInspect);
+    pbtn('Volver al menú', 112, 950, 800, 100, '#3a4656', goMenu);
   } else if (ph === 'inspect') {
     c.font = 'bold 48px sans-serif';
     let y = wrapText(c, 'Inspección previa', 60, 60, 900, 58);
@@ -1157,7 +1220,8 @@ function drawPanel() {
       c.fillStyle = '#ffb347';
       c.fillText('Marcaste ' + r.falsos + ' elemento(s) correcto(s) como defecto.', 50, y);
     }
-    pbtn('Reintentar', 312, PH - 110, 400, 90, '#2f7de1', restart);
+    pbtn('Reintentar', 90, PH - 110, 400, 90, '#2f7de1', restart);
+    pbtn('Menú', 534, PH - 110, 400, 90, '#3a4656', goMenu);
   }
   ptex.needsUpdate = true;
 }
@@ -1165,16 +1229,17 @@ function drawPanel() {
 function placePanel() {
   const fwd = V(0, 0, -1).applyQuaternion(rig.quaternion);
   const left = V(-1, 0, 0).applyQuaternion(rig.quaternion);
-  const big = state.phase === 'debrief';
-  panel.position.copy(rig.position).addScaledVector(fwd, big ? 1.9 : 1.7).addScaledVector(left, big ? 0.7 : 0.95);
-  panel.position.y = big ? 1.5 : 1.35;
+  const centered = state.phase === 'menu' || state.phase === 'teoria';
+  const big = state.phase === 'debrief' || state.phase === 'teoria';
+  panel.position.copy(rig.position).addScaledVector(fwd, big ? 1.9 : 1.7).addScaledVector(left, centered ? 0 : (big ? 0.7 : 0.95));
+  panel.position.y = centered ? 1.45 : (big ? 1.5 : 1.35);
   const cp = V(0, 0, 0);
   camera.getWorldPosition(cp);
   panel.lookAt(cp.x, panel.position.y, cp.z);
   panel.scale.setScalar(big ? 1.25 : 1);
 }
 function updatePanelVisibility() {
-  panel.visible = state.inXR && (state.phase === 'brief' || state.phase === 'inspect' || state.phase === 'debrief');
+  panel.visible = state.inXR && (state.phase === 'menu' || state.phase === 'teoria' || state.phase === 'brief' || state.phase === 'inspect' || state.phase === 'debrief');
   if (panel.visible) drawPanel();
 }
 
@@ -1267,6 +1332,7 @@ cv.addEventListener('pointerup', e => {
 });
 cv.addEventListener('pointerleave', () => { mouse.set(9, 9); });
 window.addEventListener('keydown', e => {
+  if (state.phase === 'teoria') { if (e.key === 'ArrowRight') nextSlide(); else if (e.key === 'ArrowLeft') prevSlide(); }
   if (state.phase === 'inspect' && e.key >= '1' && e.key <= '4') teleport(parseInt(e.key, 10) - 1);
 });
 
@@ -1548,6 +1614,35 @@ function toast(msg) {
   after(3.2, () => { el.style.display = 'none'; state.msg = ''; if (panel.visible) drawPanel(); });
 }
 
+function goMenu() {
+  restart();
+  state.phase = 'menu';
+  state.slide = 0;
+  renderUI();
+  placePanel();
+}
+function startTeoria() {
+  initAudio();
+  state.phase = 'teoria';
+  state.slide = 0;
+  renderUI();
+  placePanel();
+}
+function nextSlide() {
+  if (state.slide < SLIDES.length - 1) state.slide++;
+  renderUI();
+}
+function prevSlide() {
+  if (state.slide > 0) state.slide--;
+  renderUI();
+}
+function startPractico() {
+  initAudio();
+  state.phase = 'brief';
+  renderUI();
+  placePanel();
+}
+
 function startInspect() {
   initAudio();
   state.phase = 'inspect';
@@ -1753,7 +1848,7 @@ const elHelp = document.getElementById('help');
 const elActions = document.getElementById('actions');
 const elModal = document.getElementById('modal');
 const elCard = document.getElementById('card');
-const FASES = { brief: 'Briefing', inspect: 'Inspección previa', climb: 'Subiendo…', work: 'Trabajando en altura', shake: 'Trabajando en altura', lean: '', collapse: '', fall: '', impact: '', debrief: 'Resultado' };
+const FASES = { menu: '', teoria: 'Presentación', brief: 'Briefing', inspect: 'Inspección previa', climb: 'Subiendo…', work: 'Trabajando en altura', shake: 'Trabajando en altura', lean: '', collapse: '', fall: '', impact: '', debrief: 'Resultado' };
 
 function renderUI() {
   elUI.style.display = state.inXR ? 'none' : 'block';
@@ -1769,25 +1864,53 @@ function renderUI() {
   }
 
   elModal.style.display = 'none';
-  if (state.phase === 'brief') {
+  if (state.phase === 'menu') {
+    elCard.innerHTML = '<h1>Capacitación en trabajo en altura</h1>' +
+      '<p>Elige cómo quieres empezar.</p>' +
+      '<div class="row" style="flex-direction:column"><button id="b-teoria" style="padding:18px 20px;font-size:17px">Presentación (teoría)</button>' +
+      '<button id="b-practico" class="red" style="padding:18px 20px;font-size:17px">Curso práctico (simulador)</button></div>' +
+      '<small>Prototipo pedagógico. Contenido por validar con un prevencionista.</small>';
+    elModal.style.display = 'flex';
+    document.getElementById('b-teoria').onclick = startTeoria;
+    document.getElementById('b-practico').onclick = startPractico;
+  } else if (state.phase === 'teoria') {
+    const sl = SLIDES[state.slide];
+    elCard.style.maxWidth = '760px';
+    elCard.innerHTML = '<small style="margin:0 0 6px;color:#f26a1b;font-weight:700;opacity:1">PRESENTACIÓN · ' + (state.slide + 1) + ' / ' + SLIDES.length + '</small>' +
+      '<h1 style="font-size:26px">' + sl.t + '</h1>' +
+      (sl.big ? '<div style="font-size:' + (sl.big.length > 8 ? 34 : 72) + 'px;font-weight:800;color:#f26a1b;line-height:1.1;margin:6px 0">' + sl.big + '</div>' : '') +
+      (sl.sub ? '<p style="font-size:17px">' + sl.sub + '</p>' : '') +
+      (sl.items ? '<ul>' + sl.items.map(it => '<li><b style="color:#f26a1b">' + it[0] + '</b><span style="font-size:15px">' + it[1] + '</span></li>').join('') + '</ul>' : '') +
+      (sl.note ? '<small>' + sl.note + '</small>' : '') +
+      '<div class="row">' + (state.slide > 0 ? '<button id="b-prev" class="sec">‹ Anterior</button>' : '') + '<button id="b-menu" class="sec">Menú</button>' +
+      (sl.last ? '<button id="b-next" class="red">Practicar ›</button>' : '<button id="b-next">Siguiente ›</button>') + '</div>';
+    elModal.style.display = 'flex';
+    if (state.slide > 0) document.getElementById('b-prev').onclick = prevSlide;
+    document.getElementById('b-menu').onclick = goMenu;
+    document.getElementById('b-next').onclick = sl.last ? startPractico : nextSlide;
+  } else if (state.phase === 'brief') {
+    elCard.style.maxWidth = '660px';
     elCard.innerHTML = '<h1>Inspección previa de andamio</h1>' +
       '<p>Tarea: reemplazar una luminaria en la fachada, a unos ' + TOP + ' m de altura, trabajando desde este andamio.</p>' +
       '<p>Antes de subir, inspecciónalo. Marca todo lo que consideres un defecto. Luego puedes reportar el andamio como no conforme o autorizar la subida.</p>' +
-      '<div class="row"><button id="b-start">Iniciar inspección</button></div>' +
+      '<div class="row"><button id="b-start">Iniciar inspección</button><button id="b-menu2" class="sec">Volver al menú</button></div>' +
       '<small>Prototipo pedagógico. Contenido por validar con un prevencionista.</small>';
     elModal.style.display = 'flex';
     document.getElementById('b-start').onclick = startInspect;
+    document.getElementById('b-menu2').onclick = goMenu;
   } else if (state.phase === 'debrief' && state.result) {
     const r = state.result;
+    elCard.style.maxWidth = '660px';
     elCard.innerHTML = '<h1>' + r.titulo + '</h1>' +
       '<p class="score">Puntaje provisorio: ' + r.puntaje + '/100</p><p>' + r.mensaje + '</p>' +
       (r.caida ? '<div class="fall">' + r.caida.texto + '</div>' : '') + '<ul>' +
       r.items.map(it => '<li class="' + (it.found ? 'ok' : 'bad') + '"><b>' + (it.found ? '✔ ' : '✘ ') + it.nombre + '</b><span>' + it.porque + '</span></li>').join('') +
       '</ul>' + (r.falsos ? '<p>Marcaste ' + r.falsos + ' elemento(s) correcto(s) como defecto.</p>' : '') +
-      '<div class="row"><button id="b-retry">Reintentar</button><button id="b-json" class="sec">Descargar registro (JSON)</button></div>' +
+      '<div class="row"><button id="b-retry">Reintentar</button><button id="b-menu3" class="sec">Menú</button><button id="b-json" class="sec">Descargar registro (JSON)</button></div>' +
       '<small>Puntaje provisorio, sin validar con trabajadores reales. Sin referencias normativas aún.</small>';
     elModal.style.display = 'flex';
     document.getElementById('b-retry').onclick = restart;
+    document.getElementById('b-menu3').onclick = goMenu;
     document.getElementById('b-json').onclick = downloadLog;
   }
   updatePanelVisibility();
@@ -1877,7 +2000,7 @@ window.addEventListener('resize', () => {
 teleport(2);
 renderUI();
 setupVR();
-window.__sim = { state, CONFIG, DEFECTS, TOP, HIT, rig, body, scene, startInspect, reportNoConforme, authorize, restart };
+window.__sim = { goMenu, startTeoria, startPractico, nextSlide, prevSlide, SLIDES, state, CONFIG, DEFECTS, TOP, HIT, rig, body, scene, startInspect, reportNoConforme, authorize, restart };
 
 })();
 </script>
