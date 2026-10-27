@@ -837,13 +837,15 @@ function bcyl(parent, rt, rb, h, x, y, z, c, seg) {
 }
 const body = new THREE.Group();
 scene.add(body);
-const bodyLegs = [], bodyArms = [], bodyHands = [], bodyShoulders = [];
+const bodyLegs = [], bodyArms = [], bodyHands = [], bodyShoulders = [], bodyLower = [];
 let bodyYaw = 0;
 for (const sx of [-1, 1]) {
   bodyLegs.push(bcyl(body, 0.078, 0.056, 1, sx * 0.09, 0.5, 0.0, BODY.pants));
+  bodyLower.push(bodyLegs[bodyLegs.length - 1]);
   const shoe = new THREE.Group();
   shoe.position.set(sx * 0.1, 0, -0.16);
   body.add(shoe);
+  bodyLower.push(shoe);
   bell(shoe, 0.058, 0.014, 0.155, 0, 0.014, -0.03, BODY.sole);       // suela
   bell(shoe, 0.054, 0.05, 0.135, 0, 0.058, -0.04, BODY.leather);     // cuero
   bell(shoe, 0.05, 0.036, 0.06, 0, 0.046, -0.145, BODY.cap);         // puntera de acero
@@ -851,6 +853,7 @@ for (const sx of [-1, 1]) {
   bcyl(shoe, 0.056, 0.056, 0.02, 0, 0.14, 0.02, BODY.reflect);       // banda reflectante
 }
 const bodyHips = bell(body, 0.175, 0.1, 0.125, 0, 0.9, 0.05, BODY.pants);
+bodyLower.push(bodyHips);
 const bodyTorso = bcyl(body, 0.2, 0.16, 1, 0, 1.2, 0.06, BODY.vest, 16);
 bodyTorso.scale.z = 0.62;
 const bodyBandA = bcyl(body, 0.177, 0.177, 0.05, 0, 1.1, 0.06, BODY.band, 16);
@@ -986,6 +989,289 @@ function updateBody() {
     setSeg(u.fore, Ec, _b4);
     u.elbow.position.copy(Ec);
   });
+}
+
+/* ============================================================
+   SALA DE CAPACITACIÓN (presentación sentado frente a una pantalla)
+   Escena aparte, lejos de la obra. Al entrar se oculta la obra.
+   ============================================================ */
+const ROOM = new THREE.Group();
+ROOM.position.set(0, 0, 600);
+ROOM.visible = false;
+scene.add(ROOM);
+const ROOM_SEAT = { x: 0, z: 0.5 };
+const SCREEN_W = 4.5, SCREEN_H = SCREEN_W * 9 / 16, SCREEN_Y = 1.95, SCREEN_Z = -5.36;
+
+function roomPerson(x, z, ry, o) {
+  const skin = o.skin || 0xc99a7a, shirt = o.shirt || 0x59626e, pants = o.pants || 0x2f3e5c, hair = o.hair || 0x2a211a, shoe = 0x262626;
+  place(x, 0, z, ry, () => {
+    const seated = !!o.seated;
+    const hipY = seated ? 0.5 : 0.97;
+    for (const sg of [-1, 1]) {
+      if (seated) {
+        slimb(V(sg * 0.09, 0.5, 0), V(sg * 0.1, 0.5, 0.42), 0.085, 0.062, pants);
+        slimb(V(sg * 0.1, 0.5, 0.42), V(sg * 0.1, 0.09, 0.46), 0.062, 0.047, pants);
+        sell(0.05, 0.04, 0.12, sg * 0.1, 0.04, 0.52, shoe);
+      } else {
+        sell(0.05, 0.04, 0.12, sg * 0.095, 0.045, 0.055, shoe);
+        slimb(V(sg * 0.095, 0.08, 0), V(sg * 0.1, 0.5, 0.012), 0.05, 0.068, pants);
+        slimb(V(sg * 0.1, 0.5, 0.012), V(sg * 0.09, 0.95, 0), 0.068, 0.088, pants);
+      }
+    }
+    sell(0.2, 0.13, 0.125, 0, hipY + 0.01, 0, pants);
+    const y0 = hipY + 0.01, y1 = hipY + 0.53, sy = y1 - 0.05;
+    strunk(y0, y1, 0.175, 0.2, 0.62, 0, 0, shirt);
+    if (o.tie) sell(0.02, 0.1, 0.01, 0, sy - 0.1, 0.125, 0x7a1f1f);
+    for (const sg of [-1, 1]) {
+      const S = V(sg * 0.22, sy, 0);
+      let E, W;
+      if (seated) { E = V(sg * 0.26, sy - 0.28, 0.18); W = V(sg * 0.17, 0.78, 0.6); }
+      else if (o.point && sg === 1) { E = V(0.31, sy - 0.15, 0.2); W = V(0.28, sy - 0.09, 0.42); }
+      else { E = V(sg * 0.275, sy - 0.27, 0.03); W = V(sg * 0.265, sy - 0.5, 0.13); }
+      sell(0.07, 0.07, 0.07, S.x, S.y, S.z, shirt);
+      slimb(S, E, 0.052, 0.042, shirt);
+      slimb(E, W, 0.042, 0.033, shirt);
+      sell(0.034, 0.04, 0.05, W.x, W.y - (seated ? 0 : 0.05), W.z + 0.02, skin);
+    }
+    slimb(V(0, sy + 0.05, 0), V(0, sy + 0.15, 0.008), 0.058, 0.052, skin);
+    const hy = sy + 0.24;
+    sell(0.085, 0.105, 0.097, 0, hy, 0.012, skin);
+    sell(0.016, 0.022, 0.022, 0, hy - 0.018, 0.105, skin);
+    for (const sg of [-1, 1]) {
+      sell(0.011, 0.008, 0.006, sg * 0.033, hy + 0.015, 0.092, 0x1b1b1b);
+      sell(0.013, 0.026, 0.019, sg * 0.087, hy, 0.012, skin);
+    }
+    shemi(0.092, 0.085, 0.104, 0, hy + 0.03, 0.002, hair);
+    if (o.long) sell(0.095, 0.13, 0.07, 0, hy - 0.04, -0.07, hair);
+  });
+}
+function roomChair(x, z, col) {
+  sbox(0.46, 0.05, 0.46, x, 0.45, z, col);
+  sbox(0.44, 0.4, 0.05, x, 0.72, z + 0.22, col);
+  for (const dx of [-0.2, 0.2]) for (const dz of [-0.2, 0.2]) scyl(0.02, 0.02, 0.43, x + dx, 0.215, z + dz, 0x2b2f33, 6);
+}
+function roomDesk(x, z) {
+  sbox(1.2, 0.04, 0.6, x, 0.74, z, 0xc8a46a);
+  for (const dx of [-0.55, 0.55]) for (const dz of [-0.25, 0.25]) scyl(0.025, 0.025, 0.72, x + dx, 0.36, z + dz, 0x4a4f55, 6);
+  sbox(0.2, 0.015, 0.28, x + 0.3, 0.76, z, 0xf0f0ea);
+}
+(function buildRoom() {
+  const tmp = new THREE.Group(), prev = cur;
+  cur = tmp;
+  const W = 10, D = 11.4, H = 3.2;
+  sbox(W + 0.4, 0.1, D + 0.4, 0, -0.05, 0, 0x7f8387);                 // piso
+  sbox(W + 0.4, 0.1, D + 0.4, 0, H + 0.05, 0, 0xf3f2ee);              // cielo
+  sbox(W, H, 0.2, 0, H / 2, -D / 2, 0xe6e3da);                         // pared frontal
+  sbox(W, H, 0.2, 0, H / 2, D / 2, 0xe6e3da);                          // pared trasera
+  sbox(0.2, H, D, -W / 2, H / 2, 0, 0xe6e3da);                         // pared izquierda
+  sbox(0.2, H, D, W / 2, H / 2, 0, 0xe6e3da);                          // pared derecha
+  for (const z of [-D / 2 + 0.11, D / 2 - 0.11]) sbox(W - 0.2, 0.07, 0.02, 0, 1.1, z, 0xf26a1b);
+  for (const x of [-W / 2 + 0.11, W / 2 - 0.11]) sbox(0.02, 0.07, D - 0.2, x, 1.1, 0, 0xf26a1b);
+  for (let i = 0; i < 3; i++) for (let j = 0; j < 2; j++) sbox(1.4, 0.04, 0.6, -2.4 + i * 2.4, H - 0.02, -2.2 + j * 4.4, 0xffffff);   // luminarias
+  for (const z of [-3.2, 0, 3.2]) {                                    // ventanas (pared derecha)
+    sbox(0.04, 1.3, 2.0, W / 2 - 0.11, 1.9, z, 0x9cc4e4);
+    sbox(0.06, 0.06, 2.1, W / 2 - 0.12, 2.57, z, 0xf4f4f4);
+    sbox(0.06, 0.06, 2.1, W / 2 - 0.12, 1.23, z, 0xf4f4f4);
+    sbox(0.06, 1.3, 0.06, W / 2 - 0.12, 1.9, z, 0xf4f4f4);
+  }
+  sbox(1.0, 2.1, 0.06, -3.5, 1.05, D / 2 - 0.12, 0x6b4a2f);            // puerta
+  sbox(0.1, 0.04, 0.04, -3.1, 1.0, D / 2 - 0.16, 0xc0c4c8);
+  sbox(4.7, 2.75, 0.08, 0, SCREEN_Y, -D / 2 + 0.14, 0x1a1a1a);         // marco de la pantalla
+  sbox(0.5, 0.18, 0.7, 0, 3.0, 0.2, 0x2b2f33);                         // proyector
+  sbox(0.6, 1.1, 0.5, -3.3, 0.55, -4.5, 0x5b4a3a);                     // pódium
+  sbox(0.5, 0.02, 0.35, -3.3, 1.12, -4.5, 0x8a949c);
+  // pupitres y sillas: 3 filas, 5 columnas
+  const rows = [0.5, 2.3, 4.1], cols = [-3, -1.5, 0, 1.5, 3];
+  const chairCols = [0x2a5d9f, 0x2a5d9f, 0x3a6f4f, 0x2a5d9f, 0x2a5d9f];
+  rows.forEach(zc => cols.forEach((x, ci) => { roomChair(x, zc, chairCols[ci]); roomDesk(x, zc - 0.8); }));
+  for (const [x, zd] of [[-1.5, -0.3], [3, -0.3], [-3, 3.3], [1.5, 1.5]]) { shemi(0.1, 0.08, 0.11, x - 0.35, 0.77, zd, 0xffd21a); sell(0.11, 0.008, 0.13, x - 0.35, 0.765, zd + 0.02, 0xffd21a); }   // cascos sobre las mesas
+  // personas
+  const faceScreen = Math.PI;
+  const trainees = [
+    [-3, 0.5, { shirt: 0x4a5a6e, skin: 0xb98562, hair: 0x1f1a16 }], [-1.5, 0.5, { shirt: 0x6a4a3a, skin: 0x9a6a4a, hair: 0x15110e }],
+    [1.5, 0.5, { shirt: 0x3a4658, skin: 0xd8ad8c, hair: 0x6b4a2a }], [3, 0.5, { shirt: 0x4f6a52, skin: 0xc99a7a, hair: 0x2a211a, long: true }],
+    [-1.5, 2.3, { shirt: 0x7a5a3a, skin: 0xbf8f6b, hair: 0x1f1a16 }], [0, 2.3, { shirt: 0x3a4658, skin: 0xd2a07e, hair: 0x8a6a3a }],
+    [3, 2.3, { shirt: 0x59626e, skin: 0xb98562, hair: 0x15110e, long: true }],
+    [-3, 4.1, { shirt: 0x5a3a3a, skin: 0xc99a7a, hair: 0x2a211a }], [1.5, 4.1, { shirt: 0x2f4f6a, skin: 0x9a6a4a, hair: 0x15110e }]
+  ];
+  trainees.forEach(t => roomPerson(t[0], t[1], faceScreen, Object.assign({ seated: true }, t[2])));
+  roomPerson(-3.3, -4.0, faceScreen, { shirt: 0xe8e6e0, pants: 0x2b2f3a, skin: 0xd2a07e, hair: 0x4a3a2a, tie: true, point: true });   // relator
+  // planta
+  scyl(0.22, 0.17, 0.4, 4.3, 0.2, -4.6, 0x7a4a2a, 10);
+  for (let i = 0; i < 7; i++) { const a = i * 0.9; sell(0.12, 0.45, 0.12, 4.3 + Math.cos(a) * 0.15, 0.75, -4.6 + Math.sin(a) * 0.15, 0x3e7a35, [Math.sin(a) * 0.5, 0, -Math.cos(a) * 0.5]); }
+  cur = prev;
+  mergeInto(ROOM, tmp);
+  // carteles
+  const p1 = makeSign(['USO OBLIGATORIO', 'DE ARNÉS', 'EN TRABAJO EN ALTURA'], '#1e6fb8', '#ffffff', 1.4, 1.0);
+  p1.position.set(-W / 2 + 0.13, 1.9, -1.5); p1.rotation.y = Math.PI / 2; ROOM.add(p1);
+  const p2 = makeSign(['REVISA TU ANDAMIO', 'ANTES DE SUBIR'], '#f2c500', '#111111', 1.4, 1.0);
+  p2.position.set(-W / 2 + 0.13, 1.9, 1.8); p2.rotation.y = Math.PI / 2; ROOM.add(p2);
+})();
+
+/* pantalla: canvas con la lámina actual */
+const SC = document.createElement('canvas');
+SC.width = 1280; SC.height = 720;
+const sctx = SC.getContext('2d');
+const stex = new THREE.CanvasTexture(SC);
+const screenMesh = new THREE.Mesh(new THREE.PlaneGeometry(SCREEN_W, SCREEN_H), new THREE.MeshBasicMaterial({ map: stex }));
+screenMesh.position.set(0, SCREEN_Y, SCREEN_Z);
+ROOM.add(screenMesh);
+const barMesh = new THREE.Mesh(new THREE.PlaneGeometry(SCREEN_W, 0.05), new THREE.MeshBasicMaterial({ color: 0xf26a1b }));
+barMesh.position.set(0, SCREEN_Y - SCREEN_H / 2 - 0.08, SCREEN_Z + 0.01);
+ROOM.add(barMesh);
+
+function drawScreen() {
+  const c = sctx, sl = SLIDES[state.slide];
+  c.fillStyle = '#14202b'; c.fillRect(0, 0, 1280, 720);
+  c.fillStyle = '#f26a1b'; c.fillRect(0, 0, 1280, 12);
+  c.textBaseline = 'top'; c.textAlign = 'left';
+  c.fillStyle = '#f26a1b'; c.font = 'bold 22px sans-serif';
+  c.fillText('PRESENTACIÓN  ·  ' + (state.slide + 1) + ' / ' + SLIDES.length, 70, 36);
+  c.fillStyle = '#ffffff';
+  c.font = 'bold ' + (state.slide === 0 ? 92 : 54) + 'px sans-serif';
+  let y = wrapText(c, sl.t, 70, 72, 1140, state.slide === 0 ? 100 : 62) + 12;
+  if (sl.big) {
+    c.fillStyle = '#f26a1b';
+    const f = sl.big.length > 8 ? 72 : 130;
+    c.font = 'bold ' + f + 'px sans-serif';
+    y = wrapText(c, sl.big, 70, y, 1140, f + 8) + 6;
+  }
+  if (sl.sub) {
+    c.fillStyle = '#e6ebf0'; c.font = '38px sans-serif';
+    y = wrapText(c, sl.sub, 70, y, 1140, 48) + 14;
+  }
+  if (sl.items) {
+    const cols = sl.items.length > 3 ? 2 : 1, cw = (1140 - (cols - 1) * 40) / cols;
+    for (let r = 0; r * cols < sl.items.length; r++) {
+      let rowEnd = y;
+      for (let k = 0; k < cols; k++) {
+        const it = sl.items[r * cols + k];
+        if (!it) continue;
+        const x = 70 + k * (cw + 40);
+        c.fillStyle = '#f26a1b'; c.font = 'bold 38px sans-serif';
+        let yy = wrapText(c, it[0], x, y, cw, 44);
+        c.fillStyle = '#c8d0d9'; c.font = '31px sans-serif';
+        yy = wrapText(c, it[1], x, yy, cw, 39);
+        rowEnd = Math.max(rowEnd, yy);
+      }
+      y = rowEnd + 16;
+    }
+  }
+  if (sl.note) {
+    c.fillStyle = '#9fb0c0'; c.font = '24px sans-serif';
+    wrapText(c, sl.note, 70, 720 - 76, 1140, 30);
+  }
+  stex.needsUpdate = true;
+}
+
+/* control remoto sobre el pupitre (VR) */
+const RW = 1024, RH = 300;
+const rcanvas = document.createElement('canvas');
+rcanvas.width = RW; rcanvas.height = RH;
+const rctx = rcanvas.getContext('2d');
+const rtex = new THREE.CanvasTexture(rcanvas);
+const rpanel = new THREE.Mesh(new THREE.PlaneGeometry(0.72, 0.72 * RH / RW), new THREE.MeshBasicMaterial({ map: rtex, transparent: true }));
+rpanel.userData = { kind: 'rpanel' };
+rpanel.visible = false;
+rpanel.position.set(0, 0.8, -0.12);
+rpanel.rotation.x = -0.97;
+ROOM.add(rpanel);
+const rbtns = [];
+function drawRemote() {
+  const c = rctx;
+  c.clearRect(0, 0, RW, RH);
+  c.fillStyle = 'rgba(16,22,30,0.95)';
+  rrect(c, 0, 0, RW, RH, 30); c.fill();
+  rbtns.length = 0;
+  c.textBaseline = 'top'; c.textAlign = 'left';
+  c.fillStyle = '#f26a1b'; c.font = 'bold 30px sans-serif';
+  c.fillText('Lámina ' + (state.slide + 1) + ' / ' + SLIDES.length + (state.paused ? '  ·  en pausa' : '  ·  automático'), 24, 20);
+  const last = SLIDES[state.slide].last;
+  const defs = [
+    ['‹ Anterior', '#3a4656', prevSlide], [state.paused ? 'Seguir' : 'Pausa', '#3a4656', togglePause],
+    [last ? 'Practicar ›' : 'Siguiente ›', last ? '#c0592b' : '#2f7de1', last ? startPractico : nextSlide],
+    ['Menú', '#3a4656', goMenu], ['Altura', '#3a4656', calibrateSeat]
+  ];
+  defs.forEach((d, i) => {
+    const x = 20 + i * 204, y = 80, w = 184, h = 190;
+    c.fillStyle = d[1]; rrect(c, x, y, w, h, 22); c.fill();
+    c.fillStyle = '#fff'; c.font = 'bold 27px sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
+    c.fillText(d[0], x + w / 2, y + h / 2);
+    c.textAlign = 'left'; c.textBaseline = 'top';
+    rbtns.push({ x, y, w, h, fn: d[2] });
+  });
+  rtex.needsUpdate = true;
+}
+
+/* entrar / salir de la sala */
+let roomMode = false;
+const hiddenForRoom = [];
+let roomSaved = null, roomCalAt = 0;
+function setRoom(on) {
+  if (on === roomMode) return;
+  roomMode = on;
+  if (on) {
+    hiddenForRoom.length = 0;
+    scene.children.slice().forEach(o => {
+      if (o === ROOM || o === rig || o === body || o === panel || o.isLight || o.isCamera || bodyArms.indexOf(o) >= 0) return;
+      if (o.visible) { o.visible = false; hiddenForRoom.push(o); }
+    });
+    ROOM.visible = true;
+    roomSaved = { camY: camera.position.y };
+    rig.position.set(ROOM.position.x + ROOM_SEAT.x, 0, ROOM.position.z + ROOM_SEAT.z);
+    rig.rotation.y = 0;
+    resetLook(0);
+    bodyLower.forEach(m => { m.visible = false; });
+    if (!renderer.xr.isPresenting) camera.position.y = 1.15;
+    roomCalAt = nowS() + 0.5;
+    state.slide = 0;
+    slideEl = 0;
+    drawScreen();
+    drawRemote();
+  } else {
+    ROOM.visible = false;
+    hiddenForRoom.forEach(o => { o.visible = true; });
+    hiddenForRoom.length = 0;
+    bodyLower.forEach(m => { m.visible = true; });
+    rig.position.y = 0;
+    if (roomSaved && !renderer.xr.isPresenting) camera.position.y = roomSaved.camY;
+    roomSaved = null;
+    rpanel.visible = false;
+  }
+}
+function calibrateSeat() {
+  if (!roomMode) return;
+  if (renderer.xr.isPresenting) {
+    const hy = camera.position.y;
+    rig.position.y = hy > 1.35 ? 1.15 - hy : 0;       // de pie: se baja la vista a altura de sentado
+  } else rig.position.y = 0;
+  drawRemote();
+}
+let slideEl = 0, _slT = nowS();
+function slideDur(sl) {
+  const txt = [sl.t, sl.sub || '', sl.big || '', sl.note || ''].concat((sl.items || []).map(i => i[0] + ' ' + i[1])).join(' ');
+  const words = txt.split(/\s+/).length;
+  return Math.max(9, Math.min(26, 7 + words * 0.45));
+}
+function togglePause() {
+  state.paused = !state.paused;
+  drawRemote();
+  renderUI();
+}
+function updateSlides() {
+  const n = nowS(), dt = Math.min(0.1, n - _slT);
+  _slT = n;
+  if (!roomMode || state.phase !== 'teoria') return;
+  if (roomCalAt && n >= roomCalAt) { roomCalAt = 0; calibrateSeat(); }
+  rpanel.visible = state.inXR && roomMode;
+  const sl = SLIDES[state.slide], dur = slideDur(sl);
+  if (!state.paused && !sl.last) {
+    slideEl += dt;
+    if (slideEl >= dur) { nextSlide(); return; }
+  }
+  const p = sl.last ? 1 : Math.min(1, slideEl / dur);
+  barMesh.scale.x = Math.max(p, 0.0001);
+  barMesh.position.x = -SCREEN_W / 2 * (1 - p);
 }
 
 /* ============================================================
@@ -1239,7 +1525,7 @@ function placePanel() {
   panel.scale.setScalar(big ? 1.25 : 1);
 }
 function updatePanelVisibility() {
-  panel.visible = state.inXR && (state.phase === 'menu' || state.phase === 'teoria' || state.phase === 'brief' || state.phase === 'inspect' || state.phase === 'debrief');
+  panel.visible = state.inXR && (state.phase === 'menu' || state.phase === 'brief' || state.phase === 'inspect' || state.phase === 'debrief');
   if (panel.visible) drawPanel();
 }
 
@@ -1253,6 +1539,7 @@ let hover = null;
 function targets() {
   const t = [];
   if (panel.visible) t.push(panel);
+  if (roomMode && rpanel.visible) t.push(rpanel);
   if (state.phase === 'inspect') {
     HIT.forEach(h => t.push(h.mesh));
     rings.forEach(r => t.push(r));
@@ -1269,6 +1556,11 @@ function activate(hit) {
   if (k === 'panel') {
     const x = hit.uv.x * PW, y = (1 - hit.uv.y) * PH;
     for (const b of pbtns) {
+      if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) { b.fn(); return; }
+    }
+  } else if (k === 'rpanel') {
+    const x = hit.uv.x * RW, y = (1 - hit.uv.y) * RH;
+    for (const b of rbtns) {
       if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) { b.fn(); return; }
     }
   } else if (k === 'hit') {
@@ -1332,7 +1624,7 @@ cv.addEventListener('pointerup', e => {
 });
 cv.addEventListener('pointerleave', () => { mouse.set(9, 9); });
 window.addEventListener('keydown', e => {
-  if (state.phase === 'teoria') { if (e.key === 'ArrowRight') nextSlide(); else if (e.key === 'ArrowLeft') prevSlide(); }
+  if (state.phase === 'teoria') { if (e.key === 'ArrowRight') nextSlide(); else if (e.key === 'ArrowLeft') prevSlide(); else if (e.key === ' ') { e.preventDefault(); togglePause(); } }
   if (state.phase === 'inspect' && e.key >= '1' && e.key <= '4') teleport(parseInt(e.key, 10) - 1);
 });
 
@@ -1497,7 +1789,7 @@ function updateAudio() {
     L.upX.value = 0; L.upY.value = 1; L.upZ.value = 0;
   } else { L.setPosition(_ps.x, _ps.y, _ps.z); L.setOrientation(_fw.x, _fw.y, _fw.z, 0, 1, 0); }
   const ph = state.phase;
-  const target = ph === 'impact' ? 0.04 : (ph === 'fall' || ph === 'collapse') ? 0.3 : ph === 'shake' ? 0.6 : 1;
+  const target = ph === 'teoria' ? 0.06 : ph === 'impact' ? 0.04 : (ph === 'fall' || ph === 'collapse') ? 0.3 : ph === 'shake' ? 0.6 : 1;
   if (amb.level !== target) { amb.level = target; amb.master.gain.setTargetAtTime(target, actx.currentTime, 0.25); }
 }
 let _lastT = nowS();
@@ -1615,6 +1907,11 @@ function toast(msg) {
 }
 
 function goMenu() {
+  if (roomMode) {
+    fadeTo(1, 0.3);
+    after(0.35, () => { setRoom(false); restart(); state.phase = 'menu'; state.slide = 0; renderUI(); placePanel(); fadeTo(0, 0.5); });
+    return;
+  }
   restart();
   state.phase = 'menu';
   state.slide = 0;
@@ -1625,19 +1922,32 @@ function startTeoria() {
   initAudio();
   state.phase = 'teoria';
   state.slide = 0;
+  state.paused = false;
   renderUI();
-  placePanel();
+  fadeTo(1, 0.3);
+  after(0.35, () => { setRoom(true); renderUI(); fadeTo(0, 0.6); });
+}
+function onSlideChange() {
+  slideEl = 0;
+  drawScreen();
+  drawRemote();
+  renderUI();
 }
 function nextSlide() {
   if (state.slide < SLIDES.length - 1) state.slide++;
-  renderUI();
+  onSlideChange();
 }
 function prevSlide() {
   if (state.slide > 0) state.slide--;
-  renderUI();
+  onSlideChange();
 }
 function startPractico() {
   initAudio();
+  if (roomMode) {
+    fadeTo(1, 0.3);
+    after(0.35, () => { setRoom(false); restart(); renderUI(); placePanel(); fadeTo(0, 0.5); });
+    return;
+  }
   state.phase = 'brief';
   renderUI();
   placePanel();
@@ -1852,11 +2162,17 @@ const FASES = { menu: '', teoria: 'Presentación', brief: 'Briefing', inspect: '
 
 function renderUI() {
   elUI.style.display = state.inXR ? 'none' : 'block';
-  elHud.textContent = (FASES[state.phase] || '') + (state.phase === 'inspect' ? '  |  Marcados: ' + state.marks.size : '');
+  elHud.textContent = (FASES[state.phase] || '') + (state.phase === 'inspect' ? '  |  Marcados: ' + state.marks.size : '') + (state.phase === 'teoria' ? '  |  Lámina ' + (state.slide + 1) + ' / ' + SLIDES.length + (state.paused ? '  (pausa)' : '') : '');
   elHud.style.display = FASES[state.phase] ? 'block' : 'none';
   elHelp.style.display = state.phase === 'inspect' ? 'block' : 'none';
 
   elActions.innerHTML = '';
+  if (state.phase === 'teoria') {
+    const last = SLIDES[state.slide].last;
+    const mk = (txt, cls, fn) => { const b = document.createElement('button'); if (cls) b.className = cls; b.textContent = txt; b.onclick = fn; return b; };
+    elActions.append(mk('‹ Anterior', 'sec', prevSlide), mk(state.paused ? 'Seguir' : 'Pausa', 'sec', togglePause),
+      last ? mk('Practicar ›', 'red', startPractico) : mk('Siguiente ›', '', nextSlide), mk('Menú', 'sec', goMenu));
+  }
   if (state.phase === 'inspect') {
     const b1 = document.createElement('button'); b1.className = 'green'; b1.textContent = 'Reportar andamio NO conforme'; b1.onclick = reportNoConforme;
     const b2 = document.createElement('button'); b2.className = 'red'; b2.textContent = 'Autorizar y subir'; b2.onclick = authorize;
@@ -1874,20 +2190,7 @@ function renderUI() {
     document.getElementById('b-teoria').onclick = startTeoria;
     document.getElementById('b-practico').onclick = startPractico;
   } else if (state.phase === 'teoria') {
-    const sl = SLIDES[state.slide];
-    elCard.style.maxWidth = '760px';
-    elCard.innerHTML = '<small style="margin:0 0 6px;color:#f26a1b;font-weight:700;opacity:1">PRESENTACIÓN · ' + (state.slide + 1) + ' / ' + SLIDES.length + '</small>' +
-      '<h1 style="font-size:26px">' + sl.t + '</h1>' +
-      (sl.big ? '<div style="font-size:' + (sl.big.length > 8 ? 34 : 72) + 'px;font-weight:800;color:#f26a1b;line-height:1.1;margin:6px 0">' + sl.big + '</div>' : '') +
-      (sl.sub ? '<p style="font-size:17px">' + sl.sub + '</p>' : '') +
-      (sl.items ? '<ul>' + sl.items.map(it => '<li><b style="color:#f26a1b">' + it[0] + '</b><span style="font-size:15px">' + it[1] + '</span></li>').join('') + '</ul>' : '') +
-      (sl.note ? '<small>' + sl.note + '</small>' : '') +
-      '<div class="row">' + (state.slide > 0 ? '<button id="b-prev" class="sec">‹ Anterior</button>' : '') + '<button id="b-menu" class="sec">Menú</button>' +
-      (sl.last ? '<button id="b-next" class="red">Practicar ›</button>' : '<button id="b-next">Siguiente ›</button>') + '</div>';
-    elModal.style.display = 'flex';
-    if (state.slide > 0) document.getElementById('b-prev').onclick = prevSlide;
-    document.getElementById('b-menu').onclick = goMenu;
-    document.getElementById('b-next').onclick = sl.last ? startPractico : nextSlide;
+    elModal.style.display = 'none';
   } else if (state.phase === 'brief') {
     elCard.style.maxWidth = '660px';
     elCard.innerHTML = '<h1>Inspección previa de andamio</h1>' +
@@ -1985,6 +2288,7 @@ renderer.setAnimationLoop(function () {
   animScaffold();
   updateBody();
   trafficUpdate();
+  updateSlides();
   updateAudio();
   updateHover();
   renderer.render(scene, camera);
@@ -2000,7 +2304,7 @@ window.addEventListener('resize', () => {
 teleport(2);
 renderUI();
 setupVR();
-window.__sim = { goMenu, startTeoria, startPractico, nextSlide, prevSlide, SLIDES, state, CONFIG, DEFECTS, TOP, HIT, rig, body, scene, startInspect, reportNoConforme, authorize, restart };
+window.__sim = { setRoom, ROOM, goMenu, startTeoria, startPractico, nextSlide, prevSlide, SLIDES, state, CONFIG, DEFECTS, TOP, HIT, rig, body, scene, startInspect, reportNoConforme, authorize, restart };
 
 })();
 </script>
